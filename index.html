@@ -1592,6 +1592,772 @@ updateExportCounts();<\/script>
 </html>
 `;
 
+const WORKTASKS_HTML = `<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CCTV 工作事項分類表</title>
+<style>
+  :root{
+    --navy:#1F3864;
+    --navy-deep:#152747;
+    --steel:#4A6FA5;
+    --bg:#EEF1F6;
+    --card:#FFFFFF;
+    --line:#D9E2F3;
+    --line-soft:#E8EDF7;
+    --ink:#1A2233;
+    --ink-soft:#5B6478;
+    --accent:#2F855A;
+    --accent-soft:#E4F3EA;
+    --warn:#B7791F;
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Segoe UI", sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    padding:32px 16px 80px;
+  }
+  .wrap{max-width:960px;margin:0 auto;}
+
+  .masthead{
+    background:linear-gradient(135deg,var(--navy) 0%, var(--navy-deep) 100%);
+    color:#fff;
+    border-radius:14px;
+    padding:28px 32px;
+    position:relative;
+    overflow:hidden;
+  }
+  .masthead::after{
+    content:"";
+    position:absolute; right:-40px; top:-40px;
+    width:180px; height:180px;
+    border-radius:50%;
+    background:rgba(255,255,255,0.06);
+  }
+  .masthead .brand{
+    letter-spacing:.28em;
+    font-size:12px;
+    font-weight:600;
+    color:#AFC3E8;
+    text-transform:uppercase;
+  }
+  .masthead h1{
+    margin:6px 0 4px;
+    font-size:26px;
+    font-weight:700;
+    letter-spacing:.02em;
+  }
+  .masthead .sub{
+    font-size:13px;
+    color:#C7D4EC;
+  }
+  .masthead .meta{
+    margin-top:16px;
+    display:flex;
+    gap:18px;
+    flex-wrap:wrap;
+    font-size:12.5px;
+    color:#DCE6F7;
+  }
+  .masthead .meta b{color:#fff;}
+
+  .toolbar{
+    margin-top:18px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:14px 18px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .toolbar .label{font-size:13px;color:var(--ink-soft);}
+  .toolbar .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  button{
+    font-family:inherit;
+    cursor:pointer;
+    border:none;
+  }
+  .btn{
+    background:var(--navy);
+    color:#fff;
+    padding:8px 14px;
+    border-radius:8px;
+    font-size:13px;
+    font-weight:600;
+    transition:transform .08s ease, background .15s ease;
+  }
+  .btn:hover{background:var(--steel);}
+  .btn:active{transform:scale(.97);}
+  .btn.ghost{
+    background:transparent;
+    color:var(--navy);
+    border:1px solid var(--line);
+  }
+  .btn.ghost:hover{background:var(--line-soft);}
+  .save-state{font-size:12px;color:var(--ink-soft);min-width:110px;text-align:right;}
+
+  .section{
+    margin-top:26px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    overflow:hidden;
+  }
+  .section-head{
+    background:var(--navy);
+    color:#fff;
+    padding:14px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .section-head .titles{display:flex;flex-direction:column;gap:2px;}
+  .section-head .zh{font-size:15.5px;font-weight:700;}
+  .section-head .en{font-size:11.5px;color:#C7D4EC;font-weight:400;}
+  .progress-pill{
+    display:flex;align-items:center;gap:8px;
+    background:rgba(255,255,255,.12);
+    padding:6px 12px;
+    border-radius:999px;
+    font-size:12.5px;
+    white-space:nowrap;
+  }
+  .progress-track{
+    width:70px;height:6px;border-radius:4px;
+    background:rgba(255,255,255,.25);
+    overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;
+    background:#7FE0A8;
+    border-radius:4px;
+    transition:width .25s ease;
+  }
+
+  table{width:100%;border-collapse:collapse;}
+  thead th{
+    background:var(--line-soft);
+    font-size:12px;
+    color:var(--ink-soft);
+    font-weight:600;
+    padding:8px 10px;
+    border-bottom:1px solid var(--line);
+    text-align:center;
+    position:relative;
+  }
+  thead th.item-col{text-align:left;padding-left:20px;}
+  thead th.chk-col{width:76px;}
+  thead th .colname{
+    border:1px solid #C7D2E8;
+    background:#fff;
+    width:100%;
+    text-align:center;
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink);
+    outline:none;
+    border-radius:6px;
+    padding:5px 4px;
+    cursor:text;
+  }
+  thead th .colname:hover{border-color:var(--steel);}
+  thead th .colname:focus{border-color:var(--steel);box-shadow:0 0 0 2px rgba(74,111,165,.15);}
+  thead th .colname::placeholder{color:#93A0BC;}
+  thead th .rm-col{
+    position:absolute;
+    top:2px; right:2px;
+    width:16px;height:16px;
+    line-height:14px;
+    font-size:11px;
+    border-radius:50%;
+    background:transparent;
+    color:#B0B8C8;
+    cursor:pointer;
+  }
+  thead th .rm-col:hover{background:#FCE8E8;color:#C0392B;}
+
+  tbody tr{border-bottom:1px solid var(--line-soft);}
+  tbody tr:last-child{border-bottom:none;}
+  tbody tr:hover{background:#FAFBFE;}
+  td.item{
+    padding:11px 20px;
+  }
+  td.item .zh{font-size:14px;font-weight:600;color:var(--ink);}
+  td.item .en{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
+  td.chk{text-align:center;}
+
+  .checkbox{
+    width:20px;height:20px;
+    border:1.6px solid #B7C3DC;
+    border-radius:5px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:all .12s ease;
+    background:#fff;
+  }
+  .checkbox:hover{border-color:var(--steel);}
+  .checkbox.checked{
+    background:var(--accent);
+    border-color:var(--accent);
+  }
+  .checkbox.checked::after{
+    content:"";
+    width:5px;height:9px;
+    border:solid #fff;
+    border-width:0 2px 2px 0;
+    transform:rotate(45deg) translate(-1px,-1px);
+  }
+
+  .add-col-cell{
+    width:40px;
+    text-align:center;
+    vertical-align:middle;
+  }
+  .add-col-btn{
+    width:26px;height:26px;
+    border-radius:50%;
+    background:var(--line-soft);
+    color:var(--navy);
+    font-size:16px;
+    font-weight:700;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .add-col-btn:hover{background:var(--line);}
+
+  .rm-row{
+    width:22px;height:22px;
+    border-radius:50%;
+    color:#B0B8C8;
+    font-size:13px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    opacity:0;
+    transition:opacity .1s ease;
+  }
+  tr:hover .rm-row{opacity:1;}
+  .rm-row:hover{background:#FCE8E8;color:#C0392B;}
+
+  tr.add-row td{
+    padding:0;
+    border-bottom:none;
+  }
+  .add-row-btn{
+    width:100%;
+    text-align:left;
+    padding:10px 20px;
+    background:transparent;
+    color:var(--steel);
+    font-size:13px;
+    font-weight:600;
+  }
+  .add-row-btn:hover{background:var(--line-soft);}
+  .add-row-btn::before{content:"+ ";}
+
+  .new-item-form{
+    display:flex;
+    gap:8px;
+    padding:10px 20px;
+    flex-wrap:wrap;
+    background:#FAFBFE;
+    align-items:center;
+  }
+  .new-item-form input{
+    font-family:inherit;
+    font-size:13px;
+    padding:7px 10px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    outline:none;
+  }
+  .new-item-form input:focus{border-color:var(--steel);}
+  .new-item-form input.zh{flex:1;min-width:160px;}
+  .new-item-form input.en{flex:2;min-width:200px;}
+  .new-item-form .btn{padding:7px 12px;font-size:12.5px;}
+
+  footer{
+    text-align:center;
+    margin-top:28px;
+    font-size:12px;
+    color:var(--ink-soft);
+  }
+
+  @media (max-width:640px){
+    .masthead{padding:22px 18px;}
+    .masthead h1{font-size:21px;}
+    td.item{padding:10px 12px;}
+    thead th.item-col{padding-left:12px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="brand">N M D C · E N E R G Y</div>
+    <h1>CCTV 工作事項分類表</h1>
+    <div class="sub">CCTV Task Classification Overview</div>
+    <div class="meta">
+      <span>據點 <b>台中端 · 通霄端</b></span>
+      <span>共 <b id="total-count">22</b> 項工作</span>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="label">每列可直接勾選；欄位標題可點擊改成人名（如：Kai／志明），右上角「+」可新增更多欄</div>
+    <div class="actions">
+      <button class="btn ghost" id="export-word-btn">匯出 Word</button>
+      <button class="btn ghost" id="reset-btn">全部清空</button>
+      <span class="save-state" id="save-state">已載入</span>
+    </div>
+  </div>
+
+  <div id="sections"></div>
+
+  <footer>2026.08.24 · 資料自動儲存於此裝置</footer>
+</div>
+
+<script>
+const SECTION_META = [
+  { id: "recurring", zh: "固定型 Recurring", en: "常態／持續性工作 Ongoing Duties" },
+  { id: "onetime", zh: "任務型 One-Time", en: "單次執行，完成即結束 Project-Based Tasks" },
+  { id: "applications", zh: "行政申請 Applications", en: "文件／證件申請作業 Administrative Applications" },
+];
+
+const DEFAULT_ITEMS = {
+  recurring: [
+    ["CCTV 監視系統", "CCTV Surveillance System"],
+    ["100 吋電視牆後台維護與更新", "100-Inch Video Wall Backend Maintenance & Updates"],
+    ["AI 安全帽辨識系統(含 UWB)缺失通報處理", "AI Safety Helmet Recognition System (incl. UWB) – Violation Reporting"],
+    ["微氣象後台維護與更新", "Micro-Weather Station Backend Maintenance & Updates"],
+    ["全民督工網站維護", "Public Construction Supervision Website Maintenance"],
+    ["門禁管制系統維護(含太陽能系統)", "Access Control System Maintenance (incl. Solar Power System)"],
+    ["門禁卡登錄作業", "Access Card Registration"],
+    ["各系統後台管理", "Cross-System Backend Administration"],
+  ],
+  onetime: [
+    ["門禁管制三叉機維護", "Access Control Turnstile Maintenance"],
+    ["貨櫃鐵門維修", "Container Steel Door Repair"],
+    ["柵欄機 (台中)", "Barrier Gate (Taichung)"],
+    ["剪刀門安裝 (通霄)", "Scissor Gate Installation (Tongxiao)"],
+    ["紅外線系統", "Infrared System"],
+    ["GPS 系統", "GPS System"],
+    ["PMIS 系統 (發文)", "PMIS System (Correspondence)"],
+  ],
+  applications: [
+    ["PPCO 出入證資料申請", "PPCO Access Badge Application"],
+    ["危害告知申請", "Hazard Notification Application"],
+    ["加班單申請", "Overtime Application"],
+    ["車輛通行證申請", "Vehicle Pass Application"],
+    ["機具放行單申請", "Equipment Release Permit Application"],
+    ["物品攜入攜出單申請", "Item In/Out Permit Application"],
+    ["電廠出入證申請", "Power Plant Access Badge Application"],
+  ],
+};
+
+const STORAGE_KEY = "cctv-checklist-state-v4";
+const DEFAULT_COLUMNS = ["", "", ""];
+
+/* ============================= 雲端同步（改用 Google Sheet，取代原本的 window.storage）============================= */
+const WT_API_URL = 'https://script.google.com/macros/s/AKfycbxReHCmCeF1kPhYlxFSOzZv2dgnHAkvsh6i9LD91lSFM_gx8RJzb8Hl84_CfGU6qe_S/exec';
+const WT_BOOK = 'cctv';
+const WT_SHEET = '工作事項分類表設定';
+const WT_RECORD_ID = 'checklist_state';
+
+async function wtApiLoad(){
+  const url = \`\${WT_API_URL}?action=list&book=\${WT_BOOK}&sheet=\${encodeURIComponent(WT_SHEET)}\`;
+  const res = await fetch(url);
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error || '讀取失敗');
+  const row = (json.data || []).find(r => r['設定ID'] === WT_RECORD_ID);
+  return row ? row['資料內容'] : null;
+}
+async function wtApiSave(jsonString){
+  const payload = { action: 'upsert', book: WT_BOOK, sheet: WT_SHEET, record: { '設定ID': WT_RECORD_ID, '資料內容': jsonString } };
+  const res = await fetch(WT_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error || '儲存失敗');
+}
+
+
+let state = {
+  columns: [...DEFAULT_COLUMNS],
+  checks: {}, // itemId -> [bool,...]
+  items: {},  // sectionId -> [{id, zh, en}]
+};
+
+let openAddForm = null; // sectionId currently showing the "new item" form
+
+function ensureRowLength(id){
+  const row = state.checks[id] || [];
+  while(row.length < state.columns.length) row.push(false);
+  state.checks[id] = row.slice(0, state.columns.length);
+}
+
+function totalItems(){
+  return SECTION_META.reduce((n,s)=>n+(state.items[s.id]||[]).length,0);
+}
+
+async function loadState(){
+  try{
+    const res = await wtApiLoad();
+    if(res){
+      const parsed = JSON.parse(res);
+      if(parsed.columns && parsed.columns.length) state.columns = parsed.columns;
+      if(parsed.checks) state.checks = parsed.checks;
+      if(parsed.items) state.items = parsed.items;
+    }
+  }catch(e){
+    // no saved state yet, use defaults
+  }
+  // fill in default items for any section not yet in saved state
+  SECTION_META.forEach(sec=>{
+    if(!state.items[sec.id]){
+      state.items[sec.id] = DEFAULT_ITEMS[sec.id].map(([zh,en],i)=>({id:\`\${sec.id}-\${i}\`, zh, en}));
+    }
+  });
+  SECTION_META.forEach(sec=>{
+    state.items[sec.id].forEach(it=>ensureRowLength(it.id));
+  });
+}
+
+let saveTimer = null;
+function scheduleSave(){
+  const el = document.getElementById("save-state");
+  if(el) el.textContent = "儲存中…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{
+      await wtApiSave(JSON.stringify(state));
+      if(el) el.textContent = "已儲存 ✓";
+    }catch(e){
+      if(el) el.textContent = "儲存失敗";
+      console.error("storage set failed", e);
+    }
+  }, 350);
+}
+
+function render(){
+  document.getElementById("total-count").textContent = totalItems();
+  const root = document.getElementById("sections");
+  root.innerHTML = "";
+
+  SECTION_META.forEach(sec=>{
+    const items = state.items[sec.id];
+    const done = items.reduce((n,it)=>{
+      const row = state.checks[it.id] || [];
+      return n + (row.some(Boolean) ? 1 : 0);
+    },0);
+    const pct = items.length ? Math.round(done/items.length*100) : 0;
+
+    const section = document.createElement("div");
+    section.className = "section";
+    section.dataset.secId = sec.id;
+
+    section.innerHTML = \`
+      <div class="section-head">
+        <div class="titles">
+          <div class="zh">\${sec.zh}　<span style="font-weight:400;font-size:12px;color:#C7D4EC;">\${items.length} 項 Items</span></div>
+          <div class="en">\${sec.en}</div>
+        </div>
+        <div class="progress-pill">
+          <span>\${done}/\${items.length||0} 已標記</span>
+          <div class="progress-track"><div class="progress-fill" style="width:\${pct}%"></div></div>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="item-col">項目 Item</th>
+            \${state.columns.map((c,ci)=>\`
+              <th class="chk-col">
+                <input class="colname" data-ci="\${ci}" value="\${escapeAttr(c)}" placeholder="欄\${ci+1}" />
+                \${state.columns.length>1 ? \`<span class="rm-col" data-ci="\${ci}" title="刪除此欄">×</span>\` : ""}
+              </th>
+            \`).join("")}
+            <th class="add-col-cell"><span class="add-col-btn" data-sec="\${sec.id}" title="新增欄位">+</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          \${items.map(it=>{
+            const row = state.checks[it.id] || [];
+            return \`
+              <tr>
+                <td class="item">
+                  <div class="zh">▪ \${escapeHtml(it.zh)}</div>
+                  <div class="en">\${escapeHtml(it.en)}</div>
+                </td>
+                \${state.columns.map((_,ci)=>\`
+                  <td class="chk">
+                    <span class="checkbox \${row[ci] ? "checked" : ""}" data-id="\${it.id}" data-ci="\${ci}"></span>
+                  </td>
+                \`).join("")}
+                <td><span class="rm-row" data-sec="\${sec.id}" data-id="\${it.id}" title="刪除此項目">×</span></td>
+              </tr>
+            \`;
+          }).join("")}
+          <tr class="add-row">
+            <td colspan="\${state.columns.length+2}">
+              \${openAddForm===sec.id ? \`
+                <div class="new-item-form">
+                  <input class="zh" placeholder="項目名稱（中文）" id="new-zh-\${sec.id}" />
+                  <input class="en" placeholder="Item name (English，可留空)" id="new-en-\${sec.id}" />
+                  <button class="btn" data-sec="\${sec.id}" data-action="confirm-add">新增</button>
+                  <button class="btn ghost" data-action="cancel-add">取消</button>
+                </div>
+              \` : \`
+                <button class="add-row-btn" data-sec="\${sec.id}" data-action="open-add">新增項目</button>
+              \`}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    \`;
+    root.appendChild(section);
+  });
+
+  // wire events
+  root.querySelectorAll(".checkbox").forEach(box=>{
+    box.addEventListener("click", ()=>{
+      const id = box.dataset.id;
+      const ci = parseInt(box.dataset.ci,10);
+      ensureRowLength(id);
+      state.checks[id][ci] = !state.checks[id][ci];
+      box.classList.toggle("checked");
+      updateSectionProgress(box.closest(".section"));
+      scheduleSave();
+    });
+  });
+
+  root.querySelectorAll(".colname").forEach(inp=>{
+    inp.addEventListener("change", ()=>{
+      const ci = parseInt(inp.dataset.ci,10);
+      state.columns[ci] = inp.value;
+      scheduleSave();
+    });
+  });
+
+  root.querySelectorAll(".rm-col").forEach(x=>{
+    x.addEventListener("click", ()=>{
+      const ci = parseInt(x.dataset.ci,10);
+      state.columns.splice(ci,1);
+      Object.keys(state.checks).forEach(id=>{
+        state.checks[id].splice(ci,1);
+      });
+      render();
+      scheduleSave();
+    });
+  });
+
+  root.querySelectorAll(".add-col-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      state.columns.push("");
+      SECTION_META.forEach(sec=>state.items[sec.id].forEach(it=>ensureRowLength(it.id)));
+      render();
+      scheduleSave();
+    });
+  });
+
+  root.querySelectorAll(".rm-row").forEach(x=>{
+    x.addEventListener("click", ()=>{
+      const secId = x.dataset.sec;
+      const id = x.dataset.id;
+      if(!confirm("確定要刪除這個項目嗎？")) return;
+      state.items[secId] = state.items[secId].filter(it=>it.id!==id);
+      delete state.checks[id];
+      render();
+      scheduleSave();
+    });
+  });
+
+  root.querySelectorAll('[data-action="open-add"]').forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      openAddForm = btn.dataset.sec;
+      render();
+      const inp = document.getElementById(\`new-zh-\${openAddForm}\`);
+      if(inp) inp.focus();
+    });
+  });
+
+  root.querySelectorAll('[data-action="cancel-add"]').forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      openAddForm = null;
+      render();
+    });
+  });
+
+  root.querySelectorAll('[data-action="confirm-add"]').forEach(btn=>{
+    btn.addEventListener("click", ()=>submitNewItem(btn.dataset.sec));
+  });
+
+  root.querySelectorAll('.new-item-form input').forEach(inp=>{
+    inp.addEventListener("keydown", (e)=>{
+      if(e.key==="Enter"){
+        const secId = inp.id.split("-").pop();
+        submitNewItem(secId);
+      }
+    });
+  });
+}
+
+function submitNewItem(secId){
+  const zhInp = document.getElementById(\`new-zh-\${secId}\`);
+  const enInp = document.getElementById(\`new-en-\${secId}\`);
+  const zh = (zhInp && zhInp.value.trim()) || "";
+  const en = (enInp && enInp.value.trim()) || "";
+  if(!zh){
+    if(zhInp) zhInp.focus();
+    return;
+  }
+  const id = \`\${secId}-custom-\${Date.now()}\`;
+  state.items[secId].push({id, zh, en});
+  ensureRowLength(id);
+  openAddForm = null;
+  render();
+  scheduleSave();
+}
+
+function escapeHtml(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+function updateSectionProgress(sectionEl){
+  if(!sectionEl) return;
+  const secId = sectionEl.dataset.secId;
+  const items = state.items[secId] || [];
+  const done = items.reduce((n,it)=>{
+    const row = state.checks[it.id] || [];
+    return n + (row.some(Boolean) ? 1 : 0);
+  },0);
+  const pct = items.length ? Math.round(done/items.length*100) : 0;
+  const pill = sectionEl.querySelector(".progress-pill span");
+  const fill = sectionEl.querySelector(".progress-fill");
+  if(pill) pill.textContent = \`\${done}/\${items.length||0} 已標記\`;
+  if(fill) fill.style.width = pct + "%";
+}
+
+function escapeAttr(s){
+  return String(s).replace(/"/g,"&quot;");
+}
+
+document.getElementById("reset-btn").addEventListener("click", ()=>{
+  if(!confirm("確定要清空所有勾選狀態嗎？")) return;
+  Object.keys(state.checks).forEach(id=>{
+    state.checks[id] = state.checks[id].map(()=>false);
+  });
+  render();
+  scheduleSave();
+});
+
+document.getElementById("export-word-btn").addEventListener("click", exportToWord);
+
+function exportToWord(){
+  const columns = state.columns.map((c,ci)=> (c && c.trim()) ? c.trim() : \`欄\${ci+1}\`);
+  const today = new Date();
+  const dateStr = \`\${today.getFullYear()}.\${String(today.getMonth()+1).padStart(2,"0")}.\${String(today.getDate()).padStart(2,"0")}\`;
+
+  const sectionsHtml = SECTION_META.map(sec=>{
+    const items = state.items[sec.id];
+    const rows = items.map(it=>{
+      const row = state.checks[it.id] || [];
+      const chkCells = columns.map((_,ci)=>\`
+        <td style="border:1px solid #B7C3DC;text-align:center;vertical-align:middle;width:70px;">
+          <span style="font-size:16pt;font-family:'Segoe UI Symbol','DejaVu Sans',sans-serif;">\${row[ci] ? "☑" : "☐"}</span>
+        </td>\`).join("");
+      return \`
+        <tr>
+          <td style="border:1px solid #B7C3DC;padding:8px 12px;">
+            <div style="font-weight:bold;font-size:11pt;color:#1A2233;">▪ \${escapeHtml(it.zh)}</div>
+            \${it.en ? \`<div style="font-size:9.5pt;color:#5B6478;">\${escapeHtml(it.en)}</div>\` : ""}
+          </td>
+          \${chkCells}
+        </tr>\`;
+    }).join("");
+
+    const headerCols = columns.map(c=>\`
+      <td style="border:1px solid #B7C3DC;background-color:#D9E2F3;text-align:center;font-size:9.5pt;font-weight:bold;color:#1A2233;">\${escapeHtml(c)}</td>\`
+    ).join("");
+
+    return \`
+      <table style="border-collapse:collapse;width:100%;margin-bottom:24px;" cellspacing="0" cellpadding="0">
+        <tr>
+          <td colspan="\${columns.length+1}" style="background-color:#1F3864;color:#ffffff;padding:10px 16px;">
+            <span style="font-size:12.5pt;font-weight:bold;">\${sec.zh}</span>
+            <span style="font-size:9.5pt;color:#C7D4EC;"> \${sec.en} － \${items.length} 項 Items</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #B7C3DC;background-color:#D9E2F3;padding:6px 12px;font-size:9.5pt;font-weight:bold;color:#5B6478;">項目 Item</td>
+          \${headerCols}
+        </tr>
+        \${rows}
+      </table>\`;
+  }).join("");
+
+  const html = \`<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+  body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;}
+  @page { size: 21cm 29.7cm; margin: 2cm; }
+</style>
+</head>
+<body>
+  <div style="text-align:center;letter-spacing:4px;font-size:11pt;font-weight:bold;color:#1F3864;">N M D C&nbsp;&nbsp;&nbsp;E N E R G Y</div>
+  <h1 style="text-align:center;font-size:20pt;margin:8px 0 2px;color:#1A2233;">CCTV 工作事項分類表</h1>
+  <div style="text-align:center;font-size:10.5pt;color:#5B6478;font-style:italic;margin-bottom:4px;">CCTV Task Classification Overview</div>
+  <div style="text-align:center;font-size:9.5pt;color:#5B6478;margin-bottom:6px;">據點：台中端 · 通霄端　｜　共 \${totalItems()} 項工作</div>
+  <hr style="border:none;border-top:1px solid #D9E2F3;margin:14px 0 20px;">
+  \${sectionsHtml}
+  <div style="text-align:right;font-size:9.5pt;color:#5B6478;margin-top:12px;">\${dateStr}</div>
+</body>
+</html>\`;
+
+  const blob = new Blob(['\\ufeff', html], { type: "application/msword" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = \`CCTV工作事項分類表_\${dateStr.replace(/\\./g,"")}.doc\`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+
+(async function init(){
+  await loadState();
+  render();
+})();
+</script>
+</body>
+</html>
+`;
+
 const COVERALL_HTML = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -2726,6 +3492,7 @@ const NAV = [
   { key: 'gps', label: 'GPS機台資料表' },
   { key: 'ppe', label: '個人防護具' },
   { key: 'coverall', label: 'NMDC Coverall' },
+  { key: 'worktasks', label: '工作事項分類表' },
 ];
 
 function renderNav() {
@@ -2780,6 +3547,7 @@ function render() {
   else if (state.page === 'gps') c.innerHTML = renderGps();
   else if (state.page === 'ppe') { c.innerHTML = renderPpe(); const f = document.getElementById('ppeFrame'); if (f) f.srcdoc = PPE_HTML; }
   else if (state.page === 'coverall') { c.innerHTML = renderCoverall(); const cf = document.getElementById('coverallFrame'); if (cf) cf.srcdoc = COVERALL_HTML; }
+  else if (state.page === 'worktasks') { c.innerHTML = renderWorktasks(); const wf = document.getElementById('worktasksFrame'); if (wf) wf.srcdoc = WORKTASKS_HTML; }
 }
 
 /* ============================= Dashboard ============================= */
@@ -4010,6 +4778,14 @@ function renderCoverall() {
   <h1 class="page-title">🧥 NMDC Coverall 領用管理</h1>
   <p class="text-dim" style="margin-bottom:12px;">此模組資料獨立於 CCTV 平台，內建 Excel 匯出功能，操作方式與原系統相同。</p>
   <iframe id="coverallFrame" class="ppe-frame"></iframe>`;
+}
+
+/* ============================= 工作事項分類表（內嵌模組） ============================= */
+function renderWorktasks() {
+  return `
+  <h1 class="page-title">工作事項分類表</h1>
+  <p class="text-dim" style="margin-bottom:12px;">此模組資料獨立於 CCTV 平台，勾選狀態與欄位設定會同步存至雲端。</p>
+  <iframe id="worktasksFrame" class="ppe-frame"></iframe>`;
 }
 
 /* ============================= Excel 匯出 / 匯入 ============================= */
