@@ -7,16 +7,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
-  --bg-void: #0B0F14;
-  --bg-panel: #121924;
-  --bg-panel-2: #1A2330;
-  --line: #24323D;
-  --accent: #00D9C0;
+  --bg-void: #F5F7FA;
+  --bg-panel: #FFFFFF;
+  --bg-panel-2: #F0F2F7;
+  --line: #DDE1EC;
+  --accent: #4F7CFF;
   --red: #FF5A5F;
   --amber: #FFB020;
-  --green: #33D17A;
-  --text: #D7E1E6;
-  --text-dim: #7C8B96;
+  --green: #10B981;
+  --text: #1E2235;
+  --text-dim: #7A82A0;
 }
 * { box-sizing: border-box; }
 body {
@@ -37,7 +37,7 @@ body {
 .nav-list { display: flex; flex-direction: column; gap: 4px; }
 .nav-item { display: flex; align-items: center; gap: 10px; background: transparent; border: 1px solid transparent; color: var(--text-dim); padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; width: 100%; }
 .nav-item:hover { background: var(--bg-panel-2); color: var(--text); }
-.nav-item.active { background: rgba(0,217,192,.08); color: var(--accent); border-color: rgba(0,217,192,.35); }
+.nav-item.active { background: rgba(79,124,255,.08); color: var(--accent); border-color: rgba(79,124,255,.35); }
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; border-bottom: 1px solid var(--line); background: var(--bg-panel); }
@@ -132,7 +132,7 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .cal-cell.day { background: var(--bg-panel-2); border: 1px solid transparent; border-radius: 4px; cursor: pointer; color: var(--text); }
 .cal-cell.day:hover { border-color: var(--line); }
 .cal-cell.day.today { border-color: var(--accent); }
-.cal-cell.day.selected { background: rgba(0,217,192,.15); }
+.cal-cell.day.selected { background: rgba(79,124,255,.15); }
 .cal-cell.day.has-file { color: var(--accent); }
 .cal-cell.empty { visibility: hidden; }
 .cal-cell.cal-label { color: var(--text-dim); font-size: 11px; }
@@ -142,7 +142,7 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .monitor-list { width: 320px; flex-shrink: 0; max-height: 65vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 4px; padding: 8px; background: var(--bg-panel); }
 .monitor-row { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 4px; cursor: pointer; background: var(--bg-panel-2); border: 1px solid transparent; }
 .monitor-row:hover { border-color: var(--line); }
-.monitor-row.selected { border-color: var(--accent); background: rgba(0,217,192,.12); }
+.monitor-row.selected { border-color: var(--accent); background: rgba(79,124,255,.12); }
 .monitor-row.today .monitor-row-date span:first-child { color: var(--accent); }
 .monitor-row-date { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 .monitor-row-status { display: flex; align-items: center; gap: 8px; }
@@ -151,14 +151,14 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 
 .duty-list { display: flex; flex-direction: column; gap: 8px; }
 .duty-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 14px; border-radius: 4px; background: var(--bg-panel-2); border: 1px solid transparent; }
-.duty-row.today { border-color: var(--accent); background: rgba(0,217,192,.08); }
+.duty-row.today { border-color: var(--accent); background: rgba(79,124,255,.08); }
 .duty-row.weekend { border-left: 3px solid var(--amber); }
 .duty-date { flex-shrink: 0; width: 120px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; padding-top: 4px; }
 @media (max-width: 700px) { .duty-row { flex-wrap: wrap; } .duty-date { width: 100%; flex-direction: row; gap: 8px; } }
 
 .week-widget { display: flex; flex-direction: column; gap: 6px; }
 .week-widget-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 8px; border-radius: 4px; }
-.week-widget-row.today { background: rgba(0,217,192,.1); }
+.week-widget-row.today { background: rgba(79,124,255,.1); }
 .week-widget-day { width: 78px; flex-shrink: 0; color: var(--text-dim); }
 .reminder-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .reminder-item { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
@@ -274,8 +274,8 @@ function showUploadToast() {
   if (!el) {
     el = document.createElement('div');
     el.id = 'uploadToast';
-    el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--bg-panel-2,#1A2330);color:var(--text,#D7E1E6);border:1px solid var(--accent,#00D9C0);border-radius:10px;padding:12px 20px;font-size:14px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 24px rgba(0,0,0,.35);';
-    el.innerHTML = '<span style="width:14px;height:14px;border:2px solid var(--accent,#00D9C0);border-top-color:transparent;border-radius:50%;display:inline-block;animation:uploadSpin .7s linear infinite;"></span><span>檔案上傳中...</span>';
+    el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--bg-panel-2,#F0F2F7);color:var(--text,#1E2235);border:1px solid var(--accent,#4F7CFF);border-radius:10px;padding:12px 20px;font-size:14px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 24px rgba(0,0,0,.15);';
+    el.innerHTML = '<span style="width:14px;height:14px;border:2px solid var(--accent,#4F7CFF);border-top-color:transparent;border-radius:50%;display:inline-block;animation:uploadSpin .7s linear infinite;"></span><span>檔案上傳中...</span>';
     document.body.appendChild(el);
     if (!document.getElementById('uploadToastStyle')) {
       const style = document.createElement('style');
