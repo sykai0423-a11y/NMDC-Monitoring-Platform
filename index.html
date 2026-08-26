@@ -255,12 +255,40 @@ async function apiDeleteMany(sheet, ids) {
   if (!json.ok) throw new Error(json.error || '批次刪除失敗');
 }
 async function apiUploadFile(file, subfolder, oldFileUrl) {
-  const dataUrl = await fileToBase64(file);
-  const payload = { action: 'uploadFile', book: BOOK, filename: file.name, base64Data: dataUrl, mimeType: file.type, subfolder: subfolder || '', oldFileUrl: oldFileUrl || '' };
-  const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || '檔案上傳失敗');
-  return json.url;
+  showUploadToast();
+  try {
+    const dataUrl = await fileToBase64(file);
+    const payload = { action: 'uploadFile', book: BOOK, filename: file.name, base64Data: dataUrl, mimeType: file.type, subfolder: subfolder || '', oldFileUrl: oldFileUrl || '' };
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '檔案上傳失敗');
+    return json.url;
+  } finally {
+    hideUploadToast();
+  }
+}
+
+/* ============================= 上傳中提示模塊 ============================= */
+function showUploadToast() {
+  let el = document.getElementById('uploadToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'uploadToast';
+    el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--bg-panel-2,#1A2330);color:var(--text,#D7E1E6);border:1px solid var(--accent,#00D9C0);border-radius:10px;padding:12px 20px;font-size:14px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 24px rgba(0,0,0,.35);';
+    el.innerHTML = '<span style="width:14px;height:14px;border:2px solid var(--accent,#00D9C0);border-top-color:transparent;border-radius:50%;display:inline-block;animation:uploadSpin .7s linear infinite;"></span><span>檔案上傳中...</span>';
+    document.body.appendChild(el);
+    if (!document.getElementById('uploadToastStyle')) {
+      const style = document.createElement('style');
+      style.id = 'uploadToastStyle';
+      style.textContent = '@keyframes uploadSpin{to{transform:rotate(360deg);}}';
+      document.head.appendChild(style);
+    }
+  }
+  el.style.display = 'flex';
+}
+function hideUploadToast() {
+  const el = document.getElementById('uploadToast');
+  if (el) el.style.display = 'none';
 }
 
 // 各資料類型 <-> Google試算表分頁欄位對應
