@@ -3813,8 +3813,23 @@ function renderWorklog() {
 
   const STATUS_MAP = { done:['已完成','var(--green)'], pending:['待完成','var(--amber)'], incomplete:['未完成','var(--red)'] };
 
+  function tomorrowSortKey(it) {
+    // 工作項目文字常常自己打了日期（例如「8/31 …」「9/4(三) …」），
+    // 有的話優先用它排序；沒有的話退回新增當下記錄的日期。
+    const m = (it.task || '').match(/^(\d{1,2})\/(\d{1,2})/);
+    if (m) {
+      const year = (it.date || todayStr()).slice(0, 4);
+      return `${year}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+    }
+    return it.date || '9999-99-99';
+  }
+
   function tomorrowRows() {
-    const items = tomorrow.slice().sort((a,b) => (a.site||'').localeCompare(b.site||''));
+    const items = tomorrow.slice().sort((a, b) => {
+      const bySite = (a.site || '').localeCompare(b.site || '');
+      if (bySite !== 0) return bySite;
+      return tomorrowSortKey(a).localeCompare(tomorrowSortKey(b));
+    });
     return items.map(it => {
       const [label, color] = STATUS_MAP[it.status] || STATUS_MAP.pending;
       return `<div class="plan-row compact">
