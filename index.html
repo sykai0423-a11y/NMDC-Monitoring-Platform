@@ -581,14 +581,19 @@ const PPE_HTML = `<!DOCTYPE html>
   .export-btn { width: 100%; justify-content: center; margin-top: 4px; }
   .export-note { background: var(--accent-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
 
-  /* ── Excel 同步指示器 ── */
+  /* ── 雲端同步狀態指示器 ── */
   #sync-status-bar { transition: color .3s; }
   .sync-writing { color: var(--accent) !important; }
   .sync-ok { color: var(--ok) !important; }
   .sync-err { color: var(--zero) !important; }
-  #btn-link-excel.linked { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); font-weight: 600; }
   .fsa-note { background: var(--accent-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 16px; }
-  .fsa-warn { background: var(--low-bg); border: 1px solid var(--low); border-radius: 10px; padding: 12px 16px; font-size: 12px; color: var(--low); margin-bottom: 16px; display: none; }
+  /* 處理中浮動提示（iframe 內自帶一份，視覺與主程式的 showBusyToast 一致） */
+  #ppe-busy { display: none; position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 400; background: var(--surface); color: var(--text-primary); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 18px; font-size: 13px; align-items: center; gap: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.15); }
+  #ppe-busy.show { display: flex; }
+  #ppe-busy .spin { width: 14px; height: 14px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; display: inline-block; animation: ppeSpin .7s linear infinite; flex-shrink: 0; }
+  @keyframes ppeSpin { to { transform: rotate(360deg); } }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .card-btn.busy, .del-btn.busy { opacity: .5; pointer-events: none; }
   @media (max-width: 768px) {
     .layout { grid-template-columns: 1fr; }
     nav { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0; }
@@ -606,14 +611,16 @@ const PPE_HTML = `<!DOCTYPE html>
 <header>
   <div>
     <h1>🦺 個人防護具庫存管理</h1>
-    <div class="subtitle" id="sync-status-bar">📂 點擊右上角「連結 Excel」即可開始即時同步</div>
+    <div class="subtitle sync-ok" id="sync-status-bar">☁ 已連接雲端資料庫，所有操作即時同步</div>
   </div>
   <div class="header-right">
-    <button class="btn" id="btn-link-excel" onclick="linkExcelFile()" title="選取本機 Excel 檔案，之後每次變更都會自動寫入">📂 連結 Excel</button>
+    <button class="btn" id="btn-reload" onclick="reloadAll(this)" title="重新從雲端讀取最新資料">🔄 重新整理</button>
     <button class="btn btn-success" onclick="openModal('in')">＋ 進貨</button>
     <button class="btn btn-danger" onclick="openModal('out')">－ 領取</button>
   </div>
 </header>
+
+<div id="ppe-busy"><span class="spin"></span><span id="ppe-busy-msg">處理中...</span></div>
 
 <div class="layout">
   <nav>
@@ -694,25 +701,22 @@ const PPE_HTML = `<!DOCTYPE html>
     <\!-- 匯出 / 備份 -->
     <div class="page" id="page-export">
 
-      <div class="fsa-note" id="fsa-support-note">
-        <b>🔗 即時同步說明</b><br>
-        點擊右上角「連結 Excel」後選取本機的 xlsx 檔案，系統會立即讀入現有庫存，
-        且之後每次進貨 / 領取都會在 <b>2 秒內自動寫回</b>該 Excel，不需要手動按任何按鈕。<br>
-        ⚠️ 此功能需要 <b>Chrome 86+ 或 Edge 86+</b>（File System Access API）。Firefox / Safari 請改用下方「備份下載」。
-      </div>
-      <div class="fsa-warn" id="fsa-not-supported">
-        ⚠️ 你的瀏覽器不支援 File System Access API，無法即時寫回本機 Excel。請改用下方「備份下載」功能。
+      <div class="fsa-note" id="cloud-sync-note">
+        <b>☁ 雲端同步說明</b><br>
+        所有品項、異動紀錄與採購申請都直接存放在公司的 <b>Google 試算表</b>，
+        每次進貨 / 領取 / 新增裝備都會<b>立即寫回雲端</b>，不需要手動按任何儲存按鈕，
+        任何一台電腦或手機打開這個頁面看到的都是同一份最新資料。<br>
+        下方的「下載」功能只是<b>另存一份當下的快照</b>給主管看，不會影響雲端資料。
       </div>
 
       <div class="export-grid">
 
         <div class="export-card" style="border-color:var(--accent);background:var(--accent-bg)">
-          <div class="export-icon">🔗</div>
-          <div class="export-title">即時連結 Excel 檔案</div>
-          <div class="export-desc">選取本機的「個人防護具數量清冊.xlsx」，自動讀入現有庫存，之後每次操作都會自動寫回，無需手動同步。</div>
-          <div class="export-preview" id="linked-file-preview">尚未連結任何檔案</div>
-          <button class="btn btn-accent export-btn" id="btn-link-excel2" onclick="linkExcelFile()">📂 選取並連結 Excel</button>
-          <button class="btn export-btn" id="btn-unlink-excel" onclick="unlinkExcel()" style="display:none;background:var(--zero-bg);color:var(--zero);border-color:var(--zero)">✕ 解除連結</button>
+          <div class="export-icon">☁</div>
+          <div class="export-title">雲端資料庫狀態</div>
+          <div class="export-desc">本模組已改為直接讀寫 Google 試算表（防護具品項清單 / 防護具異動紀錄 / 防護具採購申請三個分頁），不再依賴本機瀏覽器儲存。</div>
+          <div class="export-preview" id="cloud-status-preview">☁ 已連接雲端資料庫，所有操作即時同步</div>
+          <button class="btn btn-accent export-btn" onclick="reloadAll(this)">🔄 重新讀取雲端資料</button>
         </div>
 
         <div class="export-card">
@@ -836,7 +840,7 @@ const PPE_HTML = `<!DOCTYPE html>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeAddModal()">取消</button>
-      <button class="btn btn-accent" onclick="submitAdd()">新增</button>
+      <button class="btn btn-accent" id="add-submit-btn" onclick="submitAdd(this)">新增</button>
     </div>
   </div>
 </div>
@@ -877,7 +881,7 @@ const PPE_HTML = `<!DOCTYPE html>
     <div class="modal-sub" id="del-sub">此操作無法復原，該品項的異動紀錄將保留。</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeDelModal()">取消</button>
-      <button class="btn btn-danger" onclick="confirmDelete()">確認刪除</button>
+      <button class="btn btn-danger" id="del-submit-btn" onclick="confirmDelete(this)">確認刪除</button>
     </div>
   </div>
 </div>
@@ -885,335 +889,228 @@ const PPE_HTML = `<!DOCTYPE html>
 <div class="toast" id="toast"></div>
 
 <script>
-const DEFAULTS = [
-  {id:'helmet', cat:'安全帽', name:'安全帽', qty:46, group:'main'},
-  {id:'vest-o-xl', cat:'背心（橘色）', name:'橘背心 XL', qty:33, group:'vest'},
-  {id:'vest-o-2xl', cat:'背心（橘色）', name:'橘背心 2XL', qty:49, group:'vest'},
-  {id:'vest-o-3xl', cat:'背心（橘色）', name:'橘背心 3XL', qty:50, group:'vest'},
-  {id:'vest-r-xl', cat:'背心（紅色）', name:'紅背心 XL', qty:8, group:'vest'},
-  {id:'vest-r-3xl', cat:'背心（紅色）', name:'紅背心 3XL', qty:6, group:'vest'},
-  {id:'vest-f-xl', cat:'背心（螢光）', name:'螢光背心 XL', qty:10, group:'vest'},
-  {id:'vest-g-2xl', cat:'背心（綠色）', name:'綠背心 2XL', qty:18, group:'vest'},
-  {id:'vest-g-3xl', cat:'背心（綠色）', name:'綠背心 3XL', qty:20, group:'vest'},
-  {id:'vest-b-xl', cat:'背心（藍色）', name:'藍背心 XL', qty:3, group:'vest'},
-  {id:'vest-b-2xl', cat:'背心（藍色）', name:'藍背心 2XL', qty:5, group:'vest'},
-  {id:'vest-b-3xl', cat:'背心（藍色）', name:'藍背心 3XL', qty:6, group:'vest'},
-  {id:'shoe-36', cat:'安全鞋', name:'安全鞋 36', qty:3, group:'shoe'},
-  {id:'shoe-37', cat:'安全鞋', name:'安全鞋 37', qty:2, group:'shoe'},
-  {id:'shoe-38', cat:'安全鞋', name:'安全鞋 38', qty:5, group:'shoe'},
-  {id:'shoe-39', cat:'安全鞋', name:'安全鞋 39', qty:5, group:'shoe'},
-  {id:'shoe-40', cat:'安全鞋', name:'安全鞋 40', qty:8, group:'shoe'},
-  {id:'shoe-41', cat:'安全鞋', name:'安全鞋 41', qty:2, group:'shoe'},
-  {id:'shoe-42', cat:'安全鞋', name:'安全鞋 42', qty:1, group:'shoe'},
-  {id:'shoe-43', cat:'安全鞋', name:'安全鞋 43', qty:3, group:'shoe'},
-  {id:'shoe-44', cat:'安全鞋', name:'安全鞋 44', qty:4, group:'shoe'},
-  {id:'shoe-45', cat:'安全鞋', name:'安全鞋 45', qty:4, group:'shoe'},
-  {id:'shoe-46', cat:'安全鞋', name:'安全鞋 46', qty:5, group:'shoe'},
-  {id:'shoe-47', cat:'安全鞋', name:'安全鞋 47', qty:5, group:'shoe'},
-  {id:'glove-m', cat:'手套', name:'手套 M', qty:10, group:'other'},
-  {id:'glove-l', cat:'手套', name:'手套 L', qty:19, group:'other'},
-  {id:'glove-xl', cat:'手套', name:'手套 XL', qty:16, group:'other'},
-  {id:'glove-clip', cat:'手套夾', name:'手套夾', qty:25, group:'main'},
-  {id:'glasses', cat:'安全眼鏡', name:'安全眼鏡', qty:45, group:'main'},
-  {id:'lifejacket', cat:'救生衣', name:'救生衣', qty:9, group:'main'},
-  {id:'led', cat:'頭戴式LED', name:'頭戴式LED', qty:28, group:'main'},
-  {id:'rain-7', cat:'雨鞋', name:'雨鞋 7', qty:4, group:'other'},
-  {id:'rain-8', cat:'雨鞋', name:'雨鞋 8', qty:18, group:'other'},
-  {id:'rain-9', cat:'雨鞋', name:'雨鞋 9', qty:22, group:'other'},
-  {id:'rain-10', cat:'雨鞋', name:'雨鞋 10', qty:24, group:'other'},
-  {id:'rain-11', cat:'雨鞋', name:'雨鞋 11', qty:10, group:'other'},
-  {id:'rain-12', cat:'雨鞋', name:'雨鞋 12', qty:4, group:'other'},
-  {id:'coat-m', cat:'雨衣', name:'雨衣 M', qty:1, group:'other'},
-  {id:'coat-l', cat:'雨衣', name:'雨衣 L', qty:6, group:'other'},
-  {id:'coat-xl', cat:'雨衣', name:'雨衣 XL', qty:16, group:'other'},
-  {id:'coat-2xl', cat:'雨衣', name:'雨衣 2XL', qty:13, group:'other'},
-  {id:'coat-3xl', cat:'雨衣', name:'雨衣 3XL', qty:10, group:'other'},
-  {id:'fire', cat:'滅火器', name:'滅火器', qty:20, group:'main'},
-  {id:'radio', cat:'對講機', name:'對講機', qty:10, group:'main'},
-];
+/* ============================= 雲端資料層（Google 試算表） =============================
+   這個模組原本把資料存在瀏覽器 localStorage（ppe_inv / ppe_logs / ppe_purchases），
+   另外再用「連結 Excel」(File System Access API) 寫回本機檔案。那個作法有兩個問題：
+     1. 換一台電腦 / 換瀏覽器就看不到資料；
+     2. 「匯入 Excel」會整包覆蓋現有庫存，選錯檔案就整份資料不見。
+   現已全面改為直接讀寫 Google 試算表的三個分頁（與系統其他模組同一個後端）：
+     防護具品項清單 / 防護具異動紀錄 / 防護具採購申請
+   注意：這份 HTML 是用 iframe srcdoc 載入的，屬於獨立的執行環境，
+   沒辦法直接呼叫外層主程式的 apiList / apiUpsert，所以這裡自帶一份最小的 API helper。
+*/
+const PPE_API_URL = 'https://script.google.com/macros/s/AKfycbxReHCmCeF1kPhYlxFSOzZv2dgnHAkvsh6i9LD91lSFM_gx8RJzb8Hl84_CfGU6qe_S/exec';
+const PPE_BOOK = 'cctv';
+const SHEET_ITEMS = '防護具品項清單';
+const SHEET_LOGS = '防護具異動紀錄';
+const SHEET_PURCHASES = '防護具採購申請';
 
-let inventory = JSON.parse(localStorage.getItem('ppe_inv') || 'null') || DEFAULTS.map(i=>({...i}));
-let logs = JSON.parse(localStorage.getItem('ppe_logs') || '[]');
-let purchases = JSON.parse(localStorage.getItem('ppe_purchases') || '[]');
+// iframe srcdoc 的 storage origin 在多數瀏覽器是隔離的，讀不到主頁存的名字時就重問一次。
+function getCurrentUser() {
+  let u = '';
+  try { u = localStorage.getItem('cctv-current-user') || ''; } catch (e) { u = ''; }
+  if (!u) {
+    u = (prompt('請輸入您的姓名（用於紀錄建立/修改人員，僅需輸入一次）：', '') || '').trim() || '未知人員';
+    try { localStorage.setItem('cctv-current-user', u); } catch (e) {}
+  }
+  return u;
+}
+
+/* ── 處理中提示：用計數器，重疊的請求不會提早把提示收起來 ── */
+let __ppeBusy = 0;
+function showBusy(msg) {
+  __ppeBusy++;
+  const m = document.getElementById('ppe-busy-msg');
+  if (m) m.textContent = msg || '處理中...';
+  const el = document.getElementById('ppe-busy');
+  if (el) el.classList.add('show');
+}
+function hideBusy() {
+  __ppeBusy = Math.max(0, __ppeBusy - 1);
+  if (__ppeBusy > 0) return;
+  const el = document.getElementById('ppe-busy');
+  if (el) el.classList.remove('show');
+}
+// 按下去的那顆按鈕在等待期間變成停用 +「儲存中...」，避免重複送出、也讓人知道沒有當掉。
+// label 傳 null 代表只停用不改文字（例如卡片上的小按鈕）。
+async function withButton(btn, label, fn) {
+  let original = null;
+  if (btn) {
+    original = btn.textContent;
+    btn.classList.add('busy');
+    if ('disabled' in btn) btn.disabled = true;
+    if (label) btn.textContent = label;
+  }
+  try {
+    return await fn();
+  } finally {
+    if (btn) {
+      btn.classList.remove('busy');
+      if ('disabled' in btn) btn.disabled = false;
+      if (label) btn.textContent = original;
+    }
+  }
+}
+
+async function ppeApiList(sheet) {
+  showBusy('讀取中...');
+  try {
+    const url = PPE_API_URL + '?action=list&book=' + PPE_BOOK + '&sheet=' + encodeURIComponent(sheet);
+    const res = await fetch(url);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '讀取失敗');
+    return json.data || [];
+  } finally { hideBusy(); }
+}
+async function ppeApiUpsert(sheet, record) {
+  showBusy('儲存中...');
+  try {
+    const payload = { action: 'upsert', book: PPE_BOOK, sheet: sheet, record: record, user: getCurrentUser() };
+    const res = await fetch(PPE_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '寫入失敗');
+    return json.data;
+  } finally { hideBusy(); }
+}
+async function ppeApiDelete(sheet, idValue) {
+  showBusy('刪除中...');
+  try {
+    const payload = { action: 'delete', book: PPE_BOOK, sheet: sheet, id: idValue };
+    const res = await fetch(PPE_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '刪除失敗');
+  } finally { hideBusy(); }
+}
+
+/* ── 小工具 ── */
+function uid(prefix) { return (prefix || '') + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function num(v) { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
+function pad2(n) { return String(n).padStart(2, '0'); }
+function fmtTime(d) { return d.getFullYear() + '/' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+// Google 試算表如果把「2026/09/09 10:35」這格認成日期，apiList 會回傳 ISO 字串，這裡轉回原本的顯示格式。
+function cleanTime(v) {
+  if (v == null || v === '') return '';
+  const s = String(v);
+  if (/^\\d{4}-\\d{2}-\\d{2}T/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const t = fmtTime(d);
+      return t.slice(-6) === ' 00:00' ? t.slice(0, -6) : t;
+    }
+  }
+  return s;
+}
+
+/* ── 群組：程式內用英文 key，試算表存中文名稱 ── */
+const GROUPS = [
+  { key: 'main', label: '主要裝備' },
+  { key: 'vest', label: '背心' },
+  { key: 'shoe', label: '安全鞋' },
+  { key: 'taichung', label: '台中端' },
+  { key: 'other', label: '其他' }
+];
+function groupLabel(g) { const f = GROUPS.find(x => x.key === g); return f ? f.label : (g || '其他'); }
+function groupKey(v) {
+  const s = String(v == null ? '' : v).trim();
+  const byLabel = GROUPS.find(x => x.label === s);
+  if (byLabel) return byLabel.key;
+  const byKey = GROUPS.find(x => x.key === s);
+  return byKey ? byKey.key : 'other';
+}
+
+/* ── 分頁欄位 <-> 程式物件 對應 ── */
+function itemToRow(i) {
+  return { '品項ID': i.id || '', '類別': i.cat || '', '品項名稱': i.name || '', '群組': groupLabel(i.group),
+           '目前庫存': i.qty, '期初庫存': (i.base === '' || i.base == null) ? '' : i.base, '備註': i.note || '' };
+}
+function itemFromRow(s) {
+  return { id: String(s['品項ID'] == null ? '' : s['品項ID']).trim(), cat: String(s['類別'] == null ? '' : s['類別']),
+           name: String(s['品項名稱'] == null ? '' : s['品項名稱']), group: groupKey(s['群組']),
+           qty: num(s['目前庫存']), base: (s['期初庫存'] === '' || s['期初庫存'] == null) ? '' : num(s['期初庫存']),
+           note: s['備註'] == null ? '' : String(s['備註']) };
+}
+function logToRow(l) {
+  return { '紀錄ID': l.id || '', '時間': l.time || '', '類型': l.typeLabel || '', '品項名稱': l.name || '',
+           '異動數量': l.delta, '人員或事由': l.person || '', '備註': l.note || '',
+           '異動前庫存': l.prev === '' || l.prev == null ? '' : l.prev, '異動後庫存': l.after === '' || l.after == null ? '' : l.after };
+}
+function logFromRow(s) {
+  const delta = num(s['異動數量']);
+  return { id: String(s['紀錄ID'] == null ? '' : s['紀錄ID']).trim(), time: cleanTime(s['時間']),
+           typeLabel: String(s['類型'] == null ? '' : s['類型']).trim(), name: String(s['品項名稱'] == null ? '' : s['品項名稱']),
+           delta: delta, qty: Math.abs(delta), person: String(s['人員或事由'] == null ? '' : s['人員或事由']),
+           note: s['備註'] == null ? '' : String(s['備註']),
+           prev: s['異動前庫存'] === '' || s['異動前庫存'] == null ? '' : num(s['異動前庫存']),
+           after: s['異動後庫存'] === '' || s['異動後庫存'] == null ? '' : num(s['異動後庫存']) };
+}
+function purchaseToRow(p) {
+  return { '申請ID': p.id || '', '品項': p.item || '', '數量': p.qty, '需求人員': p.requester || '',
+           '編輯人員': p.editor || '', '登記時間': p.time || '', '狀態': p.status === 'done' ? '已採購' : '待採購' };
+}
+function purchaseFromRow(s) {
+  const st = String(s['狀態'] == null ? '' : s['狀態']);
+  return { id: String(s['申請ID'] == null ? '' : s['申請ID']).trim(), item: String(s['品項'] == null ? '' : s['品項']),
+           qty: num(s['數量']), requester: String(s['需求人員'] == null ? '' : s['需求人員']),
+           editor: String(s['編輯人員'] == null ? '' : s['編輯人員']), time: cleanTime(s['登記時間']),
+           status: st.indexOf('已採購') >= 0 ? 'done' : 'pending' };
+}
+
+/* ── 記憶體中的資料（來源一律是雲端，這裡只是快取，方便畫面即時更新）── */
+let inventory = [];
+let logs = [];
+let purchases = [];
 let modalType = 'in';
 let preselect = null;
 let pendingDeleteId = null;
 let editingPurchaseId = null;
 
-// ── File System Access API ──
-let excelFileHandle = null;   // 持有本機檔案授權
-let syncTimer = null;         // debounce timer
-const FSA_SUPPORTED = ('showOpenFilePicker' in window);
-
-// 啟動時檢查 FSA 支援
-window.addEventListener('DOMContentLoaded', () => {
-  if (!FSA_SUPPORTED) {
-    const warn = document.getElementById('fsa-not-supported');
-    if (warn) warn.style.display = 'block';
-    const note = document.getElementById('fsa-support-note');
-    if (note) note.style.display = 'none';
-    const btns = document.querySelectorAll('#btn-link-excel,#btn-link-excel2');
-    btns.forEach(b => { b.disabled = true; b.title = '瀏覽器不支援此功能'; });
-  }
-});
-
 function setSyncStatus(state, text) {
   const bar = document.getElementById('sync-status-bar');
-  if (!bar) return;
-  bar.className = state ? 'sync-' + state : '';
-  bar.textContent = text;
+  if (bar) { bar.className = 'subtitle' + (state ? ' sync-' + state : ''); bar.textContent = text; }
+  const prev = document.getElementById('cloud-status-preview');
+  if (prev) prev.textContent = text;
 }
 
-// 讓使用者選取 Excel 檔案並取得寫入權限
-async function linkExcelFile() {
-  if (!FSA_SUPPORTED) { showToast('瀏覽器不支援，請用 Chrome/Edge 86+'); return; }
+async function loadAll() {
+  setSyncStatus('writing', '⏳ 正在讀取雲端資料…');
   try {
-    const [handle] = await window.showOpenFilePicker({
-      types: [{ description: 'Excel 檔案', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
-      multiple: false
-    });
-    // 請求寫入權限
-    const perm = await handle.requestPermission({ mode: 'readwrite' });
-    if (perm !== 'granted') { showToast('需要讀寫權限才能同步'); return; }
-
-    excelFileHandle = handle;
-    localStorage.setItem('ppe_excel_linked', handle.name);
-
-    // 立即讀入 Excel 資料
-    await readFromExcelHandle(handle);
-
-    // 更新 UI
-    updateLinkUI(handle.name);
-    showToast('✅ 已連結「' + handle.name + '」，之後操作將自動同步');
-  } catch(e) {
-    if (e.name !== 'AbortError') showToast('連結失敗：' + e.message);
+    const [itemRows, logRows, purchaseRows] = await Promise.all([
+      ppeApiList(SHEET_ITEMS), ppeApiList(SHEET_LOGS), ppeApiList(SHEET_PURCHASES)
+    ]);
+    inventory = itemRows.map(itemFromRow).filter(i => i.id && i.name);
+    logs = logRows.map(logFromRow).filter(l => l.id);
+    purchases = purchaseRows.map(purchaseFromRow).filter(p => p.id);
+    setSyncStatus('ok', '☁ 已連接雲端資料庫，所有操作即時同步');
+    return true;
+  } catch (err) {
+    console.error(err);
+    setSyncStatus('err', '❌ 雲端讀取失敗：' + (err && err.message ? err.message : err));
+    showToast('雲端讀取失敗，請確認 Google 試算表已建立「防護具品項清單 / 防護具異動紀錄 / 防護具採購申請」三個分頁');
+    return false;
   }
 }
-
-function unlinkExcel() {
-  excelFileHandle = null;
-  localStorage.removeItem('ppe_excel_linked');
-  updateLinkUI(null);
-  setSyncStatus(null, '📂 點擊右上角「連結 Excel」即可開始即時同步');
-  showToast('已解除 Excel 連結');
+async function reloadAll(btn) {
+  await withButton(btn, '讀取中...', async () => { await loadAll(); renderAll(); });
+  showToast('已重新讀取雲端資料');
 }
 
-function updateLinkUI(filename) {
-  const btn1 = document.getElementById('btn-link-excel');
-  const btn2 = document.getElementById('btn-link-excel2');
-  const preview = document.getElementById('linked-file-preview');
-  const unlinkBtn = document.getElementById('btn-unlink-excel');
-  if (filename) {
-    if (btn1) { btn1.textContent = '🔗 ' + filename; btn1.classList.add('linked'); }
-    if (btn2) { btn2.textContent = '🔄 重新選取 Excel'; }
-    if (preview) preview.textContent = '已連結：' + filename;
-    if (unlinkBtn) unlinkBtn.style.display = '';
-    setSyncStatus('ok', '🔗 已連結 ' + filename + ' ─ 操作後自動同步');
-  } else {
-    if (btn1) { btn1.textContent = '📂 連結 Excel'; btn1.classList.remove('linked'); }
-    if (btn2) { btn2.textContent = '📂 選取並連結 Excel'; }
-    if (preview) preview.textContent = '尚未連結任何檔案';
-    if (unlinkBtn) unlinkBtn.style.display = 'none';
-  }
+// 一筆異動：先寫「異動紀錄」，再更新「品項清單」的目前庫存。兩個都成功才更新畫面。
+async function commitTransaction(item, delta, typeLabel, person, note) {
+  const prev = item.qty;
+  const after = prev + delta;
+  const log = { id: uid('r'), time: fmtTime(new Date()), typeLabel: typeLabel, name: item.name,
+                delta: delta, qty: Math.abs(delta), person: person || '', note: note || '', prev: prev, after: after };
+  await ppeApiUpsert(SHEET_LOGS, logToRow(log));
+  const updated = Object.assign({}, item, { qty: after });
+  await ppeApiUpsert(SHEET_ITEMS, itemToRow(updated));
+  item.qty = after;
+  logs.push(log);
+  return log;
 }
-
-// 從已授權 handle 讀入 Excel
-async function readFromExcelHandle(handle) {
-  if (typeof XLSX === 'undefined') { showToast('SheetJS 尚未載入'); return; }
-  const file = await handle.getFile();
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
-
-  // 找到「庫存總覽」或第一張工作表
-  const sheetName = wb.SheetNames.find(n => n.includes('庫存') || n.includes('總覽')) || wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-
-  let headerRow = -1, catCol = -1, nameCol = -1, qtyCol = -1;
-  for (let r = 0; r < Math.min(rows.length, 10); r++) {
-    const row = rows[r];
-    for (let c = 0; c < row.length; c++) {
-      const cell = String(row[c]).trim();
-      if (cell === '類別') catCol = c;
-      if (cell === '品項') nameCol = c;
-      if (cell.includes('目前庫存')) qtyCol = c;
-    }
-    if (catCol >= 0 && nameCol >= 0 && qtyCol >= 0) { headerRow = r; break; }
-  }
-  if (headerRow < 0) { showToast('⚠️ 找不到標準欄位，保留現有資料'); return; }
-
-  const catMap = {
-    '安全帽': 'main', '手套': 'other', '手套夾': 'main',
-    '安全眼鏡': 'main', '救生衣': 'main', '頭戴式LED': 'main',
-    '滅火器': 'main', '對講機': 'main',
-    '背心': 'vest', '安全鞋': 'shoe', '雨鞋': 'other', '雨衣': 'other',
-    '台中端': 'taichung'
-  };
-  function guessGroup(cat, name) {
-    for (const [k,v] of Object.entries(catMap)) if (cat.includes(k)||name.includes(k)) return v;
-    return 'other';
-  }
-  function nameToId(n) { return 'xl_' + n.replace(/\\s+/g,'_'); }
-
-  const imported = [];
-  function parseCol(rows, headerRow, catC, nameC, qtyC) {
-    for (let r = headerRow + 1; r < rows.length; r++) {
-      const row = rows[r];
-      const catRaw = String(row[catC] || '').replace(/^[^\\w\\u4e00-\\u9fff]+/, '').trim();
-      const nameRaw = String(row[nameC] || '').trim();
-      const qtyRaw = parseInt(row[qtyC]);
-      if (!nameRaw || isNaN(qtyRaw)) continue;
-      if (imported.find(i => i.name === nameRaw)) continue;
-      const catClean = catRaw.replace(/^[\\u{1F900}-\\u{1FFFF}]/u, '').trim();
-      imported.push({ id: nameToId(nameRaw), cat: catClean || nameRaw, name: nameRaw, qty: qtyRaw, group: guessGroup(catClean, nameRaw) });
-    }
-  }
-  parseCol(rows, headerRow, catCol, nameCol, qtyCol);
-  // 右欄（雙欄格式，偏移5）
-  if (catCol + 5 < rows[headerRow].length) parseCol(rows, headerRow, catCol+5, nameCol+5, qtyCol+5);
-
-  if (imported.length === 0) { showToast('⚠️ 未解析到品項'); return; }
-
-  let updated = 0, added = 0;
-  imported.forEach(xi => {
-    const ex = inventory.find(i => i.name === xi.name);
-    if (ex) { ex.qty = xi.qty; updated++; }
-    else { inventory.push(xi); added++; }
-  });
-
-  // ── 一併讀入「採購申請」工作表（若存在）──
-  const purchaseSheetName = wb.SheetNames.find(n => n.includes('採購'));
-  if (purchaseSheetName) {
-    const pws = wb.Sheets[purchaseSheetName];
-    const prows = XLSX.utils.sheet_to_json(pws, { header: 1, defval: '' });
-    let pHeaderRow = -1, cItem=-1, cQty=-1, cReq=-1, cEdit=-1, cTime=-1, cStatus=-1;
-    for (let r = 0; r < Math.min(prows.length, 5); r++) {
-      const row = prows[r];
-      for (let c = 0; c < row.length; c++) {
-        const cell = String(row[c]).trim();
-        if (cell === '品項') cItem = c;
-        if (cell === '數量') cQty = c;
-        if (cell === '需求人員') cReq = c;
-        if (cell === '編輯人員') cEdit = c;
-        if (cell.includes('登記時間')||cell==='時間') cTime = c;
-        if (cell === '狀態') cStatus = c;
-      }
-      if (cItem>=0 && cQty>=0) { pHeaderRow = r; break; }
-    }
-    if (pHeaderRow >= 0) {
-      const importedPurchases = [];
-      for (let r = pHeaderRow + 1; r < prows.length; r++) {
-        const row = prows[r];
-        const itemRaw = String(row[cItem]||'').trim();
-        const qtyRaw = parseInt(row[cQty]);
-        if (!itemRaw || isNaN(qtyRaw)) continue;
-        const statusRaw = String(cStatus>=0?row[cStatus]:'').trim();
-        importedPurchases.push({
-          item: itemRaw, qty: qtyRaw,
-          requester: cReq>=0?String(row[cReq]||'').trim():'',
-          editor: cEdit>=0?String(row[cEdit]||'').trim():'',
-          time: cTime>=0?String(row[cTime]||'').trim():'',
-          status: statusRaw.includes('已採購') ? 'done' : 'pending'
-        });
-      }
-      importedPurchases.forEach(ip => {
-        const ex = purchases.find(p => p.item===ip.item && p.time===ip.time && p.requester===ip.requester);
-        if (ex) { ex.qty = ip.qty; ex.editor = ip.editor; ex.status = ip.status; }
-        else { purchases.push({ id: uid(), ...ip }); }
-      });
-    }
-  }
-
-  save(false); // 不觸發寫回，避免循環
-  renderAll();
-  setSyncStatus('ok', '🔗 已連結 ' + handle.name + ' ─ 操作後自動同步');
-}
-
-// 寫回 Excel（debounce 2秒）
-function scheduleWriteBack() {
-  if (!excelFileHandle) return;
-  clearTimeout(syncTimer);
-  setSyncStatus('writing', '⏳ 同步中…');
-  syncTimer = setTimeout(() => writeBackToExcel(), 2000);
-}
-
-async function writeBackToExcel() {
-  if (!excelFileHandle || typeof XLSX === 'undefined') return;
-  try {
-    const statusText = q => q===0?'❌ 缺貨':q<=4?'⚠️ 偏低':'✅ 充足';
-    const typeText = t => t==='in'?'進貨':t==='out'?'領取':'盤點';
-    const wb = XLSX.utils.book_new();
-
-    // 工作表1：庫存總覽（雙欄）
-    const overviewRows = [
-      ['📊 個人防護具庫存總覽'],
-      ['⚡ 最後同步：' + new Date().toLocaleString('zh-TW')],
-      ['類別','品項','目前庫存','狀態','','類別','品項','目前庫存','狀態']
-    ];
-    const half = Math.ceil(inventory.length / 2);
-    for (let i = 0; i < half; i++) {
-      const l = inventory[i], r = inventory[i + half];
-      const row = [l.cat, l.name, l.qty, statusText(l.qty), ''];
-      if (r) row.push(r.cat, r.name, r.qty, statusText(r.qty));
-      overviewRows.push(row);
-    }
-    overviewRows.push([], ['顏色說明'], ['✅ 充足（庫存 ≥ 5件）','⚠️ 偏低（庫存 1-4件）','❌ 缺貨（庫存 = 0件）']);
-    const ws1 = XLSX.utils.aoa_to_sheet(overviewRows);
-    ws1['!cols'] = [16,18,10,10,2,16,18,10,10].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, ws1, '📊 庫存總覽');
-
-    // 工作表2：異動流水帳
-    const logRows = [['時間','類型','品項名稱','異動數量','人員/事由','備註','異動前庫存','異動後庫存']];
-    [...logs].reverse().forEach(l => logRows.push([
-      l.time, typeText(l.type), l.name,
-      (l.type==='in'?'+':'-') + l.qty,
-      l.person||'', l.note||'', l.prev??'', l.after??''
-    ]));
-    const ws2 = XLSX.utils.aoa_to_sheet(logRows);
-    ws2['!cols'] = [18,8,18,10,16,16,12,12].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, ws2, '📝 異動流水帳');
-
-    // 工作表3：品項清單
-    const itemRows = [['ID','類別','品項名稱','群組','目前庫存','狀態']];
-    inventory.forEach(i => itemRows.push([i.id, i.cat, i.name, groupLabel(i.group), i.qty, statusText(i.qty)]));
-    const ws3 = XLSX.utils.aoa_to_sheet(itemRows);
-    ws3['!cols'] = [20,16,18,12,12,10].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, ws3, '🗂 品項清單');
-
-    // 工作表4：採購申請
-    const purchaseRows = [['品項','數量','需求人員','編輯人員','登記時間','狀態']];
-    [...purchases].reverse().forEach(p => purchaseRows.push([
-      p.item, p.qty, p.requester||'', p.editor||'', p.time, p.status==='done'?'✅ 已採購':'⏳ 待採購'
-    ]));
-    const ws4 = XLSX.utils.aoa_to_sheet(purchaseRows);
-    ws4['!cols'] = [18,8,14,14,18,10].map(w=>({wch:w}));
-    XLSX.utils.book_append_sheet(wb, ws4, '🛒 採購申請');
-
-    // 寫入本機檔案
-    const wbBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const writable = await excelFileHandle.createWritable();
-    await writable.write(new Blob([wbBuf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    await writable.close();
-
-    setSyncStatus('ok', '✅ 已同步至 ' + excelFileHandle.name + '（' + new Date().toLocaleTimeString('zh-TW') + '）');
-  } catch(e) {
-    setSyncStatus('err', '❌ 同步失敗：' + e.message);
-    console.error(e);
-  }
-}
-
-function save(doSync = true) {
-  localStorage.setItem('ppe_inv', JSON.stringify(inventory));
-  localStorage.setItem('ppe_logs', JSON.stringify(logs));
-  localStorage.setItem('ppe_purchases', JSON.stringify(purchases));
-  if (doSync) scheduleWriteBack();
-}
-function uid() { return 'item_' + Date.now() + '_' + Math.random().toString(36).slice(2,6); }
 function statusClass(q) { return q===0?'zero':q<=4?'low':'ok'; }
 function statusLabel(q) { return q===0?'❌ 缺貨':q<=4?'⚠️ 偏低':'✅ 充足'; }
 function pillClass(q) { return q===0?'pill-zero':q<=4?'pill-low':'pill-ok'; }
 function barColor(q) { return q===0?'#E24B4A':q<=4?'#BA7517':'#1D9E75'; }
-function groupLabel(g) { return {main:'主要裝備',vest:'背心',shoe:'安全鞋',taichung:'台中端',other:'其他'}[g]||g; }
 
 function renderAll() {
   renderStats(); renderOverview(); renderCharts(); renderLow(); renderLog(); renderManageTable(); renderPurchase(); updateLowBadge(); updatePurchaseBadge(); updateExportCounts();
@@ -1298,9 +1195,9 @@ function renderLog() {
   tbody.innerHTML = [...logs].reverse().slice(0,100).map(l=>\`
     <tr>
       <td>\${l.time}</td>
-      <td><span class="tag \${l.type==='in'?'tag-in':'tag-out'}">\${l.type==='in'?'進貨':'領取'}</span></td>
+      <td><span class="tag \${l.delta>=0?'tag-in':'tag-out'}">\${l.typeLabel||(l.delta>=0?'進貨':'領取')}</span></td>
       <td>\${l.name}</td>
-      <td style="font-weight:600">\${l.type==='in'?'+':'−'}\${l.qty}</td>
+      <td style="font-weight:600">\${l.delta>=0?'+':'−'}\${Math.abs(l.delta)}</td>
       <td>\${l.person||'—'}</td>
       <td style="color:var(--text-muted)">\${l.note||'—'}</td>
     </tr>\`).join('');
@@ -1351,12 +1248,12 @@ function renderPurchase() {
       <td>\${p.editor||'—'}</td>
       <td>\${p.time}</td>
       <td style="text-align:center">
-        <span class="tag \${p.status==='done'?'tag-in':'tag-out'}" style="cursor:pointer" onclick="togglePurchaseDone('\${p.id}')" title="點擊切換狀態">\${p.status==='done'?'✅ 已採購':'⏳ 待採購'}</span>
+        <span class="tag \${p.status==='done'?'tag-in':'tag-out'}" style="cursor:pointer" onclick="togglePurchaseDone('\${p.id}',this)" title="點擊切換狀態">\${p.status==='done'?'✅ 已採購':'⏳ 待採購'}</span>
       </td>
       <td style="text-align:center">
         <div style="display:flex;gap:6px;justify-content:center">
           <button class="btn btn-sm" onclick="startEditPurchase('\${p.id}')">編輯</button>
-          <button class="btn btn-sm btn-danger" onclick="deletePurchase('\${p.id}')">刪除</button>
+          <button class="btn btn-sm btn-danger" onclick="deletePurchase('\${p.id}',this)">刪除</button>
         </div>
       </td>
     </tr>\`).join('');
@@ -1396,35 +1293,47 @@ function startEditPurchase(id) {
 }
 function closePurchaseModal() { document.getElementById('purchase-overlay').classList.remove('open'); editingPurchaseId = null; }
 function closePurchaseOutside(e) { if(e.target===document.getElementById('purchase-overlay')) closePurchaseModal(); }
-function submitPurchase() {
+async function submitPurchase() {
+  const btn = document.getElementById('purchase-submit-btn');
   const item = document.getElementById('purchase-item').value.trim();
   const qty = parseInt(document.getElementById('purchase-qty').value, 10);
   const requester = document.getElementById('purchase-requester').value.trim();
   const editor = document.getElementById('purchase-editor').value.trim();
   if (!item) { showToast('請填寫品項'); return; }
   if (!qty || qty < 1) { showToast('請輸入有效數量'); return; }
-  const now = new Date();
-  const time = \`\${now.getFullYear()}/\${String(now.getMonth()+1).padStart(2,'0')}/\${String(now.getDate()).padStart(2,'0')} \${String(now.getHours()).padStart(2,'0')}:\${String(now.getMinutes()).padStart(2,'0')}\`;
-  if (editingPurchaseId) {
-    const p = purchases.find(x=>x.id===editingPurchaseId);
-    if (p) { p.item=item; p.qty=qty; p.requester=requester; p.editor=editor; p.time=time; }
-    showToast('採購申請已更新');
-  } else {
-    purchases.push({ id: uid(), item, qty, requester, editor, time, status: 'pending' });
-    showToast('採購申請已新增');
+  const time = fmtTime(new Date());
+  const editingId = editingPurchaseId;
+  const existing = editingId ? purchases.find(x=>x.id===editingId) : null;
+  const rec = existing
+    ? Object.assign({}, existing, { item: item, qty: qty, requester: requester, editor: editor, time: time })
+    : { id: uid('p'), item: item, qty: qty, requester: requester, editor: editor, time: time, status: 'pending' };
+  try {
+    await withButton(btn, '儲存中...', () => ppeApiUpsert(SHEET_PURCHASES, purchaseToRow(rec)));
+  } catch (err) {
+    showToast('儲存失敗：' + (err && err.message ? err.message : err));
+    return;
   }
-  save(); renderAll(); closePurchaseModal();
+  if (existing) { Object.assign(existing, rec); showToast('採購申請已更新'); }
+  else { purchases.push(rec); showToast('採購申請已新增'); }
+  renderAll(); closePurchaseModal();
 }
-function togglePurchaseDone(id) {
+async function togglePurchaseDone(id, el) {
   const p = purchases.find(x=>x.id===id); if (!p) return;
-  p.status = p.status==='done' ? 'pending' : 'done';
-  save(); renderAll();
+  const next = p.status==='done' ? 'pending' : 'done';
+  try {
+    await withButton(el, null, () => ppeApiUpsert(SHEET_PURCHASES, purchaseToRow(Object.assign({}, p, { status: next }))));
+  } catch (err) { showToast('更新失敗：' + (err && err.message ? err.message : err)); return; }
+  p.status = next;
+  renderAll();
 }
-function deletePurchase(id) {
+async function deletePurchase(id, btn) {
   const p = purchases.find(x=>x.id===id); if (!p) return;
   if (!confirm(\`確定要刪除「\${p.item}」的採購申請嗎？\`)) return;
+  try {
+    await withButton(btn, '刪除中...', () => ppeApiDelete(SHEET_PURCHASES, id));
+  } catch (err) { showToast('刪除失敗：' + (err && err.message ? err.message : err)); return; }
   purchases = purchases.filter(x=>x.id!==id);
-  save(); renderAll();
+  renderAll();
   showToast('採購申請已刪除');
 }
 
@@ -1435,11 +1344,24 @@ function startEdit(id, field) {
   inp.style.display='inline-block';
   inp.focus(); inp.select();
 }
-function saveEdit(id, field) {
+async function saveEdit(id, field) {
   const inp = document.getElementById(\`\${field}-edit-\${id}\`);
+  if (!inp || inp.dataset.saving === '1') return;
   const val = inp.value.trim();
-  if (val) { inventory.find(i=>i.id===id)[field] = val; save(); renderAll(); }
-  else { inp.style.display='none'; document.getElementById(\`\${field}-display-\${id}\`).style.display='inline'; }
+  const item = inventory.find(i=>i.id===id);
+  const closeBack = () => { inp.style.display='none'; const d = document.getElementById(\`\${field}-display-\${id}\`); if (d) d.style.display='inline'; };
+  if (!item || !val || val === item[field]) { closeBack(); return; }
+  inp.dataset.saving = '1'; inp.disabled = true;
+  try {
+    await ppeApiUpsert(SHEET_ITEMS, itemToRow(Object.assign({}, item, { [field]: val })));
+  } catch (err) {
+    inp.dataset.saving = ''; inp.disabled = false;
+    showToast('儲存失敗：' + (err && err.message ? err.message : err));
+    return;
+  }
+  item[field] = val;
+  renderAll();
+  showToast('已更新「' + item.name + '」');
 }
 function editKeydown(e, id, field) {
   if (e.key==='Enter') { e.target.blur(); }
@@ -1453,13 +1375,18 @@ function askDelete(id) {
   document.getElementById('del-sub').textContent = \`確定要刪除「\${item.name}」嗎？此操作無法復原。\`;
   document.getElementById('del-overlay').classList.add('open');
 }
-function confirmDelete() {
+async function confirmDelete(btn) {
   if (!pendingDeleteId) return;
-  const item = inventory.find(i=>i.id===pendingDeleteId);
-  inventory = inventory.filter(i=>i.id!==pendingDeleteId);
+  const id = pendingDeleteId;
+  const item = inventory.find(i=>i.id===id);
+  if (!item) { closeDelModal(); return; }
+  try {
+    await withButton(btn, '刪除中...', () => ppeApiDelete(SHEET_ITEMS, id));
+  } catch (err) { showToast('刪除失敗：' + (err && err.message ? err.message : err)); return; }
+  inventory = inventory.filter(i=>i.id!==id);
   pendingDeleteId = null;
-  save(); renderAll(); closeDelModal();
-  showToast(\`「\${item.name}」已刪除\`);
+  renderAll(); closeDelModal();
+  showToast(\`「\${item.name}」已刪除（過往異動紀錄保留）\`);
 }
 function closeDelModal() { document.getElementById('del-overlay').classList.remove('open'); pendingDeleteId=null; }
 function closeDelOutside(e) { if(e.target===document.getElementById('del-overlay')) closeDelModal(); }
@@ -1468,14 +1395,18 @@ function closeDelOutside(e) { if(e.target===document.getElementById('del-overlay
 function openAddModal() { document.getElementById('add-overlay').classList.add('open'); document.getElementById('add-name').focus(); }
 function closeAddModal() { document.getElementById('add-overlay').classList.remove('open'); }
 function closeAddOutside(e) { if(e.target===document.getElementById('add-overlay')) closeAddModal(); }
-function submitAdd() {
+async function submitAdd(btn) {
   const name = document.getElementById('add-name').value.trim();
   if (!name) { showToast('請填寫品項名稱'); return; }
   const cat = document.getElementById('add-cat').value.trim() || name;
   const group = document.getElementById('add-group').value;
   const qty = Math.max(0, parseInt(document.getElementById('add-qty').value)||0);
-  inventory.push({id:uid(), cat, name, qty, group});
-  save(); renderAll(); closeAddModal();
+  const rec = { id: uid('item_'), cat: cat, name: name, qty: qty, group: group, base: qty, note: '' };
+  try {
+    await withButton(btn, '儲存中...', () => ppeApiUpsert(SHEET_ITEMS, itemToRow(rec)));
+  } catch (err) { showToast('新增失敗：' + (err && err.message ? err.message : err)); return; }
+  inventory.push(rec);
+  renderAll(); closeAddModal();
   document.getElementById('add-name').value='';
   document.getElementById('add-cat').value='';
   document.getElementById('add-qty').value='0';
@@ -1502,21 +1433,31 @@ function setType(t) {
 }
 function closeModal() { document.getElementById('overlay').classList.remove('open'); }
 function closeModalOutside(e) { if(e.target===document.getElementById('overlay')) closeModal(); }
-function submitModal() {
+async function submitModal() {
+  const btn=document.getElementById('modal-submit');
   const id=document.getElementById('sel-item').value;
   const qty=parseInt(document.getElementById('inp-qty').value,10);
   const person=document.getElementById('inp-person').value.trim();
   const note=document.getElementById('inp-note').value.trim();
   if(!qty||qty<1){showToast('請輸入有效數量');return;}
   const item=inventory.find(i=>i.id===id); if(!item)return;
-  if(modalType==='out'&&qty>item.qty){showToast(\`庫存不足！\${item.name} 目前僅剩 \${item.qty} 件\`);return;}
-  const prev=item.qty;
-  item.qty=modalType==='in'?item.qty+qty:item.qty-qty;
-  const now=new Date();
-  const time=\`\${now.getFullYear()}/\${String(now.getMonth()+1).padStart(2,'0')}/\${String(now.getDate()).padStart(2,'0')} \${String(now.getHours()).padStart(2,'0')}:\${String(now.getMinutes()).padStart(2,'0')}\`;
-  logs.push({time,type:modalType,id,name:item.name,qty,person,note,prev,after:item.qty});
-  save(); renderAll(); closeModal();
-  showToast(\`\${item.name} \${modalType==='in'?'進貨':'領取'} \${qty} 件，剩餘 \${item.qty} 件\`);
+  if(modalType==='out'&&qty>item.qty){
+    // 目前庫存可能因為之前「領取後歸還但未恢復庫存」之類的狀況已經是 0 或負數，
+    // 這種情況下還是要讓使用者能把「實際發生的領取」記下來，只是要跳出來提醒一下，
+    // 不能像以前一樣直接擋掉、讓紀錄整筆消失卻沒有任何提示。
+    const proceed = confirm(\`\${item.name} 目前庫存僅剩 \${item.qty} 件，登記後將變成 \${item.qty - qty} 件（負數代表帳面已經對不上，可能是先前有未計入的異動）。\n\n確定仍要登記這筆領取嗎？\`);
+    if (!proceed) return;
+  }
+  const typeLabel = modalType==='in' ? '進貨' : '領取';
+  const delta = modalType==='in' ? qty : -qty;
+  try {
+    await withButton(btn, '儲存中...', () => commitTransaction(item, delta, typeLabel, person, note));
+  } catch (err) {
+    showToast('儲存失敗：' + (err && err.message ? err.message : err));
+    return;
+  }
+  renderAll(); closeModal();
+  showToast(\`\${item.name} \${typeLabel} \${qty} 件，剩餘 \${item.qty} 件\`);
 }
 
 // ── Navigation ──
@@ -1565,11 +1506,10 @@ function exportInventory() {
 
 // ── 匯出：異動紀錄 ──
 function exportLogs() {
-  const typeText = t => t==='in'?'進貨':t==='out'?'領取':'盤點';
   const rows = [['時間','類型','品項名稱','異動數量','人員/事由','備註','異動前','異動後']];
   [...logs].reverse().forEach(l => rows.push([
-    l.time, typeText(l.type), l.name,
-    (l.type==='in'?'+':'-') + l.qty,
+    l.time, l.typeLabel || (l.delta>=0?'進貨':'領取'), l.name,
+    (l.delta>=0?'+':'-') + Math.abs(l.delta),
     l.person||'', l.note||'',
     l.prev??'', l.after??''
   ]));
@@ -1621,8 +1561,12 @@ function downloadXlsx(rows, sheetName, filename, opts) {
   XLSX.writeFile(wb, filename);
 }
 
-renderAll();
-updateExportCounts();<\/script>
+// ── 啟動：先把三個雲端分頁的資料抓下來，再畫畫面 ──
+(async function init() {
+  renderAll();               // 先畫空畫面，避免載入期間整頁空白
+  await loadAll();
+  renderAll();
+})();<\/script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>
 </body>
 </html>
