@@ -140,12 +140,17 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 
 .monitor-layout { display: flex; gap: 16px; align-items: flex-start; }
 .monitor-list { width: 320px; flex-shrink: 0; max-height: 65vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 4px; padding: 8px; background: var(--bg-panel); }
-.monitor-row { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 4px; cursor: pointer; background: var(--bg-panel-2); border: 1px solid transparent; }
+.monitor-row { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 4px; cursor: pointer; background: var(--bg-panel-2); border: 1px solid transparent; }
 .monitor-row:hover { border-color: var(--line); }
 .monitor-row.selected { border-color: var(--accent); background: rgba(79,124,255,.12); }
 .monitor-row.today .monitor-row-date span:first-child { color: var(--accent); }
+.monitor-row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+.monitor-row-check input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+.monitor-row-check input[disabled] { cursor: not-allowed; opacity: .35; }
+.monitor-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
 .monitor-row-date { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 .monitor-row-status { display: flex; align-items: center; gap: 8px; }
+.monitor-download-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .monitor-detail { flex: 1; min-width: 260px; }
 @media (max-width: 900px) { .monitor-layout { flex-direction: column; } .monitor-list { width: 100%; } }
 
@@ -3508,7 +3513,7 @@ renderLoc('taipei');
 </body>
 </html>`;
 
-let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), monitorSelected: null, pendingUpload: null, monitorSummaryYear: new Date().getFullYear(), dutyCursor: (()=>{const d=new Date(); d.setDate(1); return d;})() };
+let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), monitorSelected: null, monitorDownloadSelected: new Set(), pendingUpload: null, monitorSummaryYear: new Date().getFullYear(), dutyCursor: (()=>{const d=new Date(); d.setDate(1); return d;})() };
 
 /* ============================= nav ============================= */
 const NAV = [
@@ -3977,15 +3982,27 @@ function renderMonitor() {
     const isToday = key === todayStr();
     const sel = state.monitorSelected === key;
     const wd = weekLabel[new Date(year, month, d).getDay()];
+    const checked = state.monitorDownloadSelected.has(key);
     rows.push(`<div class="monitor-row ${sel?'selected':''} ${isToday?'today':''}" onclick="selectMonitorDate('${key}')">
-      <div class="monitor-row-date">
-        <span class="mono">${key}</span><span class="text-dim" style="font-size:11px;">週${wd}${isToday?'・今天':''}</span>
-      </div>
-      <div class="monitor-row-status">
-        ${has ? `<span class="pill pill-green">已上傳</span><span class="text-dim" style="font-size:12px;">${esc(rec.filename)}</span>` : `<span class="pill pill-red">未上傳</span>`}
+      <label class="monitor-row-check" onclick="event.stopPropagation()" title="${has?'勾選以加入批次下載':'此日期尚無檔案，無法下載'}">
+        <input type="checkbox" ${checked?'checked':''} ${has?'':'disabled'} onchange="toggleMonitorDownload('${key}')">
+      </label>
+      <div class="monitor-row-main">
+        <div class="monitor-row-date">
+          <span class="mono">${key}</span><span class="text-dim" style="font-size:11px;">週${wd}${isToday?'・今天':''}</span>
+        </div>
+        <div class="monitor-row-status">
+          ${has ? `<span class="pill pill-green">已上傳</span><span class="text-dim" style="font-size:12px;">${esc(rec.filename)}</span>` : `<span class="pill pill-red">未上傳</span>`}
+        </div>
       </div>
     </div>`);
   }
+  const selectedCount = [...state.monitorDownloadSelected].filter(k => files[k]).length;
+  const downloadToolbar = `<div class="monitor-download-bar">
+    <button class="btn ghost" onclick="selectAllMonitorInMonth(${year}, ${month})">全選本月</button>
+    <button class="btn ghost" onclick="clearMonitorDownloadSelection()">清除勾選</button>
+    <button class="btn primary" ${selectedCount===0?'disabled':''} onclick="downloadSelectedMonitorFiles()">⬇ 下載所選（${selectedCount}）</button>
+  </div>`;
 
   let detail = '';
   if (state.monitorSelected) {
@@ -4024,6 +4041,7 @@ function renderMonitor() {
     <span class="mono">${year} / ${String(month+1).padStart(2,'0')}</span>
     <button class="icon-btn" onclick="shiftMonth(1)">下個月 ▶</button>
   </div>
+  ${downloadToolbar}
   <div class="monitor-layout">
     <div class="monitor-list">${rows.join('')}</div>
     <div class="monitor-detail">${detail}</div>
@@ -4082,6 +4100,36 @@ function downloadMonitorFile(date) {
   const rec = DB.monitorFiles[date];
   if (!rec || !rec.fileUrl) return;
   window.open(toDriveDownloadUrl(rec.fileUrl), '_blank');
+}
+function toggleMonitorDownload(key) {
+  if (state.monitorDownloadSelected.has(key)) state.monitorDownloadSelected.delete(key);
+  else state.monitorDownloadSelected.add(key);
+  renderPreserveScroll();
+}
+function selectAllMonitorInMonth(year, month) {
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (DB.monitorFiles[key]) state.monitorDownloadSelected.add(key);
+  }
+  renderPreserveScroll();
+}
+function clearMonitorDownloadSelection() {
+  state.monitorDownloadSelected.clear();
+  renderPreserveScroll();
+}
+// 逐一觸發瀏覽器下載每個勾選日期的檔案（各自獨立的檔案，不會合併成單一壓縮檔，
+// 因為檔案原始存放在各自的 Google 雲端硬碟連結上）。用小間隔錯開觸發時間，
+// 降低瀏覽器把後面的下載誤判為快顯視窗而擋掉的機率。
+function downloadSelectedMonitorFiles() {
+  const keys = [...state.monitorDownloadSelected].filter(k => DB.monitorFiles[k]).sort();
+  if (keys.length === 0) { alert('請先勾選要下載的日期'); return; }
+  keys.forEach((key, i) => {
+    setTimeout(() => {
+      const rec = DB.monitorFiles[key];
+      if (rec && rec.fileUrl) window.open(toDriveDownloadUrl(rec.fileUrl), '_blank');
+    }, i * 400);
+  });
 }
 /* ============================= 監看紀錄表月彙總（獨立頁面，以月份為單位） ============================= */
 function renderMonitorSummary() {
