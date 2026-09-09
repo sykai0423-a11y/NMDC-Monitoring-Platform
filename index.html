@@ -1192,7 +1192,9 @@ function renderLow() {
 function renderLog() {
   const tbody = document.getElementById('log-tbody');
   if (!logs.length) { tbody.innerHTML='<tr><td colspan="6" class="empty">尚無異動紀錄</td></tr>'; return; }
-  tbody.innerHTML = [...logs].reverse().slice(0,100).map(l=>\`
+  // 目前資料量（幾百筆）瀏覽器顯示完全沒問題，就不裁切了；未來如果累積到幾千筆
+  // 造成畫面變慢，再回來加分頁或日期篩選。
+  tbody.innerHTML = [...logs].reverse().map(l=>\`
     <tr>
       <td>\${l.time}</td>
       <td><span class="tag \${l.delta>=0?'tag-in':'tag-out'}">\${l.typeLabel||(l.delta>=0?'進貨':'領取')}</span></td>
