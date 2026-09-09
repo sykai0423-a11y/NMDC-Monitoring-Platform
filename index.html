@@ -366,6 +366,9 @@ const SHEET_MAP = {
   duty: { sheet: '監看值班表', idCol: '排班ID',
     toRow: r => ({ '排班ID': r.id||'', '日期': r.date, '值班人員': r.person, '班別': r.type, '代班人員': r.backup||'', '備註': r.note||'' }),
     fromRow: s => ({ id: s['排班ID'], date: cleanDate(s['日期']), person: s['值班人員'], type: s['班別']||'正常值班', backup: s['代班人員']||'', note: s['備註']||'' }) },
+  router: { sheet: '路由器更換表', idCol: '設備ID',
+    toRow: r => ({ '設備ID': r.id||'', '站點': r.site, '設備類型': r.type, '設備編號': r.code, '目前版本': r.cur||'第一版', '更換後版本': r.next||'', '更換日期': r.date||'', '狀態': r.status||'未更換', '備註': r.note||'' }),
+    fromRow: s => ({ id: s['設備ID'], site: s['站點'], type: s['設備類型'], code: s['設備編號'], cur: s['目前版本']||'第一版', next: s['更換後版本']||'', date: s['更換日期']||'', status: s['狀態']||'未更換', note: s['備註']||'' }) },
 };
 
 // 監看紀錄表：以日期為主鍵，獨立處理
@@ -391,17 +394,18 @@ async function apiSaveMonitorMonthly(month, filename, fileUrl, overwriteCount) {
 }
 
 // 全域資料快取：畫面渲染時直接讀這裡（同步），寫入/刪除成功後才重新從雲端拉取該類型資料
-let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [] };
+let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [] };
 
 async function loadAllData() {
   const contentEl = document.getElementById('content');
   contentEl.innerHTML = '<div class="page"><p class="text-dim">連線 Google 雲端讀取資料中…</p></div>';
   try {
-    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows] = await Promise.all([
+    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows] = await Promise.all([
       apiList('工作日誌'), apiList('明日預計工作'), apiList('POE抽查日誌'), apiList('POE其他需求檔案'),
       apiList('台中端設備清單'), apiList('通霄端設備清單'), apiListMonitor(), apiListMonitorMonthly(),
       apiList('POE預約抽查'), apiList('設備維護紀錄'), apiList('GPS機台資料表'),
       apiList('監看值班表').catch(() => []), // 若試算表尚未新增「監看值班表」分頁，先以空陣列降級，不中斷其他資料讀取
+      apiList('路由器更換表').catch(() => []), // 同上，尚未新增「路由器更換表」分頁時先降級成空陣列
     ]);
     DB.patrol = patrolRows.map(SHEET_MAP.patrol.fromRow);
     DB.tomorrow = tomorrowRows.map(SHEET_MAP.tomorrow.fromRow);
@@ -415,6 +419,7 @@ async function loadAllData() {
     DB.equipMaint = equipMaintRows.map(SHEET_MAP.equipMaint.fromRow);
     DB.gpsDevices = gpsRows.map(SHEET_MAP.gpsDevices.fromRow);
     DB.duty = dutyRows.map(SHEET_MAP.duty.fromRow);
+    DB.router = routerRows.map(SHEET_MAP.router.fromRow);
   } catch (err) {
     contentEl.innerHTML = `<div class="page"><p class="warn-text">雲端資料讀取失敗：${esc(String(err))}</p><button class="btn primary" onclick="loadAllData()">重試</button></div>`;
     return;
@@ -4217,42 +4222,7 @@ async function doClearMonitorMonthly(month) {
   render();
 }
 
-/* ============================= POE抽查日誌 ============================= */
 /* ============================= 路由器更換表 ============================= */
-// 目前先用固定資料呈現（跟 kai 給的 Excel 一致），之後要接雲端試算表即時同步時，
-// 把這個陣列換成 DB.xxx（透過 apiList('路由器更換表') 讀進來）即可，畫面邏輯不用大改。
-const ROUTER_DATA = [
-  {no:1,  site:'台中端', type:'固定式攝影機', code:'A-固-01', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:2,  site:'台中端', type:'固定式攝影機', code:'A-固-02', cur:'第一版', note:'',                                   next:'第二版', date:'9/4 更換4G route', status:'已更換'},
-  {no:3,  site:'台中端', type:'固定式攝影機', code:'A-固-03', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:4,  site:'台中端', type:'固定式攝影機', code:'A-固-04', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:5,  site:'台中端', type:'固定式攝影機', code:'A-固-05', cur:'第一版', note:'',                                   next:'第二版', date:'8/3',              status:'已更換'},
-  {no:6,  site:'台中端', type:'固定式攝影機', code:'A-固-06', cur:'第一版', note:'6/21',                               next:'',      date:'',                status:'未更換'},
-  {no:7,  site:'台中端', type:'固定式攝影機', code:'A-固-07', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:8,  site:'台中端', type:'固定式攝影機', code:'A-固-08', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:9,  site:'台中端', type:'固定式攝影機', code:'A-固-09', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:10, site:'台中端', type:'固定式攝影機', code:'A-固-10', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:11, site:'台中端', type:'固定式攝影機', code:'A-固-11', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:12, site:'台中端', type:'固定式攝影機', code:'A-固-12', cur:'第一版', note:'5/26 4G Router sim 卡增加金屬卡座', next:'',      date:'',                status:'未更換'},
-  {no:13, site:'台中端', type:'移動式攝影機', code:'A-移-01', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:14, site:'台中端', type:'移動式攝影機', code:'A-移-02', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:15, site:'台中端', type:'門禁攝影機',   code:'A-門禁攝影機01', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
-  {no:16, site:'台中端', type:'門禁攝影機',   code:'A-門禁攝影機02', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
-  {no:17, site:'台中端', type:'固定式攝影機', code:'A-固-01-2', cur:'第一版', note:'',                                 next:'',      date:'',                status:'未更換'},
-  {no:18, site:'通霄端', type:'固定式攝影機', code:'B-固-09', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:19, site:'通霄端', type:'固定式攝影機', code:'B-固-10', cur:'第一版', note:'',                                   next:'第二版', date:'8/7 更換4G route', status:'已更換'},
-  {no:20, site:'通霄端', type:'固定式攝影機', code:'B-固-11', cur:'第一版', note:'',                                   next:'第二版', date:'8/10更換4G route', status:'已更換'},
-  {no:21, site:'通霄端', type:'固定式攝影機', code:'B-固-12', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:22, site:'通霄端', type:'移動式攝影機', code:'B-移-03', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:23, site:'通霄端', type:'移動式攝影機', code:'B-移-04', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:24, site:'通霄端', type:'移動式攝影機', code:'B-移-05', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:25, site:'通霄端', type:'移動式攝影機', code:'B-移-06', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:26, site:'通霄端', type:'移動式攝影機', code:'B-移-07', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:27, site:'通霄端', type:'移動式攝影機', code:'B-移-08', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
-  {no:28, site:'通霄端', type:'門禁攝影機',   code:'B-門禁攝影機01', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
-  {no:29, site:'通霄端', type:'門禁攝影機',   code:'B-門禁攝影機02', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
-];
-
 function routerStatusPill(status) {
   const map = { '已更換':'pill-green', '未更換':'pill-red', '損壞待換':'pill-red', '已下單待貨':'pill-amber' };
   return `<span class="pill ${map[status]||'pill-amber'}">${status}</span>`;
@@ -4261,12 +4231,13 @@ function routerStatusPill(status) {
 function renderRouter() {
   window.__routerFilterSite = window.__routerFilterSite || '全部';
   window.__routerFilterStatus = window.__routerFilterStatus || '全部';
+  const data = DB.router;
 
-  const total = ROUTER_DATA.length;
-  const done = ROUTER_DATA.filter(r => r.status === '已更換').length;
-  const pending = ROUTER_DATA.filter(r => r.status === '未更換').length;
-  const tc = ROUTER_DATA.filter(r => r.site === '台中端').length;
-  const tx = ROUTER_DATA.filter(r => r.site === '通霄端').length;
+  const total = data.length;
+  const done = data.filter(r => r.status === '已更換').length;
+  const pending = data.filter(r => r.status === '未更換').length;
+  const tc = data.filter(r => r.site === '台中端').length;
+  const tx = data.filter(r => r.site === '通霄端').length;
   const pct = total ? Math.round(done / total * 100) : 0;
 
   const statCards = [
@@ -4280,10 +4251,9 @@ function renderRouter() {
     <div class="stat-label">${s.label}</div>
   </div>`).join('');
 
-  const rows = ROUTER_DATA
-    .filter(r => (window.__routerFilterSite==='全部' || r.site===window.__routerFilterSite) && (window.__routerFilterStatus==='全部' || r.status===window.__routerFilterStatus))
-    .map(r => `<tr>
-      <td class="mono text-dim">${r.no}</td>
+  const filtered = data.filter(r => (window.__routerFilterSite==='全部' || r.site===window.__routerFilterSite) && (window.__routerFilterStatus==='全部' || r.status===window.__routerFilterStatus));
+  const rows = filtered.map((r, i) => `<tr>
+      <td class="mono text-dim">${i+1}</td>
       <td><span class="site-tag">${esc(r.site)}</span></td>
       <td>${esc(r.type)}</td>
       <td class="mono">${esc(r.code)}</td>
@@ -4292,7 +4262,11 @@ function renderRouter() {
       <td class="text-dim">${esc(r.date)||'—'}</td>
       <td>${routerStatusPill(r.status)}</td>
       <td class="text-dim">${esc(r.note)||'—'}</td>
-    </tr>`).join('') || `<tr><td colspan="9" class="text-dim" style="text-align:center;padding:20px;">沒有符合篩選條件的設備</td></tr>`;
+      <td>
+        <button class="icon-btn" onclick="showRouterForm('${r.id}')">✎</button>
+        <button class="icon-btn danger" onclick="confirmDelRouter('${r.id}')">🗑</button>
+      </td>
+    </tr>`).join('') || `<tr><td colspan="10" class="text-dim" style="text-align:center;padding:20px;">沒有符合篩選條件的設備</td></tr>`;
 
   return `
   <h1 class="page-title">📡 路由器更換表</h1>
@@ -4305,7 +4279,7 @@ function renderRouter() {
     <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
   </div>
 
-  <div class="section-head"><h2 class="section-title">設備清單</h2></div>
+  <div class="section-head"><h2 class="section-title">設備清單</h2><button class="btn primary" onclick="showRouterForm()">＋ 新增設備</button></div>
   <div class="filter-row">
     <span class="text-dim mono" style="font-size:12px;">站點篩選：</span>
     <select class="input" style="width:120px" onchange="window.__routerFilterSite=this.value;render()">
@@ -4318,14 +4292,79 @@ function renderRouter() {
       <option ${window.__routerFilterStatus==='全部'?'selected':''}>全部</option>
       <option ${window.__routerFilterStatus==='未更換'?'selected':''}>未更換</option>
       <option ${window.__routerFilterStatus==='已更換'?'selected':''}>已更換</option>
+      <option ${window.__routerFilterStatus==='損壞待換'?'selected':''}>損壞待換</option>
+      <option ${window.__routerFilterStatus==='已下單待貨'?'selected':''}>已下單待貨</option>
     </select>
   </div>
   <div class="table-wrap"><table class="data-table">
-    <thead><tr><th>序號</th><th>站點</th><th>設備類型</th><th>設備編號</th><th>目前版本</th><th>更換後版本</th><th>更換日期</th><th>狀態</th><th>備註</th></tr></thead>
+    <thead><tr><th>序號</th><th>站點</th><th>設備類型</th><th>設備編號</th><th>目前版本</th><th>更換後版本</th><th>更換日期</th><th>狀態</th><th>備註</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
 }
 
+function showRouterForm(id) {
+  const item = id ? DB.router.find(r => r.id === id) : null;
+  openModal(item ? `編輯設備 · ${esc(item.code)}` : '新增設備', `
+    <div class="form-grid">
+      <input type="hidden" id="rf-id" value="${item?item.id:''}">
+      <label class="field"><span class="field-label mono">站點</span><select class="input" id="rf-site">
+        <option ${item&&item.site==='台中端'?'selected':''}>台中端</option>
+        <option ${item&&item.site==='通霄端'?'selected':''}>通霄端</option>
+      </select></label>
+      <label class="field"><span class="field-label mono">設備類型</span><input class="input" id="rf-type" list="router-type-list" value="${item?esc(item.type):'固定式攝影機'}"></label>
+      <datalist id="router-type-list"><option value="固定式攝影機"><option value="移動式攝影機"><option value="門禁攝影機"></datalist>
+      <label class="field"><span class="field-label mono">設備編號</span><input class="input" id="rf-code" value="${item?esc(item.code):''}"></label>
+      <label class="field"><span class="field-label mono">目前版本</span><select class="input" id="rf-cur">
+        <option ${!item||item.cur==='第一版'?'selected':''}>第一版</option>
+        <option ${item&&item.cur==='第二版'?'selected':''}>第二版</option>
+      </select></label>
+      <label class="field"><span class="field-label mono">更換後版本（尚未更換可留空）</span><select class="input" id="rf-next">
+        <option value="" ${!item||!item.next?'selected':''}>—</option>
+        <option ${item&&item.next==='第二版'?'selected':''}>第二版</option>
+      </select></label>
+      <label class="field"><span class="field-label mono">更換日期／備註（例如 9/4 更換4G route）</span><input class="input" id="rf-date" value="${item?esc(item.date):''}"></label>
+      <label class="field"><span class="field-label mono">狀態</span><select class="input" id="rf-status">
+        <option ${!item||item.status==='未更換'?'selected':''}>未更換</option>
+        <option ${item&&item.status==='已更換'?'selected':''}>已更換</option>
+        <option ${item&&item.status==='損壞待換'?'selected':''}>損壞待換</option>
+        <option ${item&&item.status==='已下單待貨'?'selected':''}>已下單待貨</option>
+      </select></label>
+      <label class="field"><span class="field-label mono">備註</span><input class="input" id="rf-note" value="${item?esc(item.note):''}"></label>
+      <div class="row-end"><button class="btn primary" id="rf-save-btn" onclick="saveRouter(this)">儲存</button></div>
+    </div>`);
+}
+async function saveRouter(btn) {
+  const idVal = document.getElementById('rf-id').value;
+  const rec = {
+    id: idVal || undefined,
+    site: document.getElementById('rf-site').value,
+    type: document.getElementById('rf-type').value.trim(),
+    code: document.getElementById('rf-code').value.trim(),
+    cur: document.getElementById('rf-cur').value,
+    next: document.getElementById('rf-next').value,
+    date: document.getElementById('rf-date').value.trim(),
+    status: document.getElementById('rf-status').value,
+    note: document.getElementById('rf-note').value.trim(),
+  };
+  if (!rec.code) { alert('請填寫設備編號'); return; }
+  const originalLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中...'; }
+  try { await apiUpsert(SHEET_MAP.router.sheet, SHEET_MAP.router.toRow(rec)); await reloadOne('router'); }
+  catch (err) {
+    alert('儲存失敗：' + err + '\n（若是第一次使用，請確認 Google 試算表已新增「路由器更換表」分頁）');
+    if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    return;
+  }
+  closeModal(); render();
+}
+function confirmDelRouter(id) { confirmDialog('確定要刪除這筆設備資料嗎？', `doDelRouter('${id}')`); }
+async function doDelRouter(id) {
+  try { await apiDelete(SHEET_MAP.router.sheet, id); await reloadOne('router'); }
+  catch (err) { alert('刪除失敗：' + err); return; }
+  render();
+}
+
+/* ============================= POE抽查日誌 ============================= */
 function renderPoe() {
   window.__poeTab = window.__poeTab || 'check';
   const checks = DB.poeChecks;
