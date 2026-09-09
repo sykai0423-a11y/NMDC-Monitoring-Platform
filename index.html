@@ -239,25 +239,40 @@ async function apiList(sheet) {
   return json.data;
 }
 async function apiUpsert(sheet, record) {
-  const payload = { action: 'upsert', book: BOOK, sheet, record, user: getCurrentUser() };
-  const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || '寫入失敗');
-  return json.data;
+  showBusyToast('儲存中...');
+  try {
+    const payload = { action: 'upsert', book: BOOK, sheet, record, user: getCurrentUser() };
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '寫入失敗');
+    return json.data;
+  } finally {
+    hideBusyToast();
+  }
 }
 async function apiDelete(sheet, idValue) {
-  const payload = { action: 'delete', book: BOOK, sheet, id: idValue };
-  const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || '刪除失敗');
+  showBusyToast('刪除中...');
+  try {
+    const payload = { action: 'delete', book: BOOK, sheet, id: idValue };
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '刪除失敗');
+  } finally {
+    hideBusyToast();
+  }
 }
 // 批次刪除（一次網路請求刪多筆），需要 Apps Script 有加 deleteMany action；
 // 若後端尚未更新（回傳 unknown action），呼叫端會收到例外，可自行 fallback 成逐筆 apiDelete。
 async function apiDeleteMany(sheet, ids) {
-  const payload = { action: 'deleteMany', book: BOOK, sheet, ids };
-  const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || '批次刪除失敗');
+  showBusyToast('刪除中...');
+  try {
+    const payload = { action: 'deleteMany', book: BOOK, sheet, ids };
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '批次刪除失敗');
+  } finally {
+    hideBusyToast();
+  }
 }
 async function apiUploadFile(file, subfolder, oldFileUrl) {
   showUploadToast();
@@ -273,14 +288,19 @@ async function apiUploadFile(file, subfolder, oldFileUrl) {
   }
 }
 
-/* ============================= 上傳中提示模塊 ============================= */
-function showUploadToast() {
+/* ============================= 處理中提示模塊 ============================= */
+// 任何跟 Google 試算表/雲端硬碟溝通的動作（存檔、刪除、上傳檔案…）都會顯示這個
+// 浮動提示，讓使用者知道「系統正在處理」而不是網頁當掉了。用計數器處理同時有
+// 多個請求在跑的情況：全部結束才會真的把提示收起來。
+let __busyCount = 0;
+function showBusyToast(msg) {
+  __busyCount++;
   let el = document.getElementById('uploadToast');
   if (!el) {
     el = document.createElement('div');
     el.id = 'uploadToast';
     el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--bg-panel-2,#F0F2F7);color:var(--text,#1E2235);border:1px solid var(--accent,#4F7CFF);border-radius:10px;padding:12px 20px;font-size:14px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 24px rgba(0,0,0,.15);';
-    el.innerHTML = '<span style="width:14px;height:14px;border:2px solid var(--accent,#4F7CFF);border-top-color:transparent;border-radius:50%;display:inline-block;animation:uploadSpin .7s linear infinite;"></span><span>檔案上傳中...</span>';
+    el.innerHTML = '<span style="width:14px;height:14px;border:2px solid var(--accent,#4F7CFF);border-top-color:transparent;border-radius:50%;display:inline-block;animation:uploadSpin .7s linear infinite;flex-shrink:0;"></span><span class="busy-toast-msg">處理中...</span>';
     document.body.appendChild(el);
     if (!document.getElementById('uploadToastStyle')) {
       const style = document.createElement('style');
@@ -289,12 +309,18 @@ function showUploadToast() {
       document.head.appendChild(style);
     }
   }
+  el.querySelector('.busy-toast-msg').textContent = msg || '處理中...';
   el.style.display = 'flex';
 }
-function hideUploadToast() {
+function hideBusyToast() {
+  __busyCount = Math.max(0, __busyCount - 1);
+  if (__busyCount > 0) return; // 還有其他請求在跑，先別收起提示
   const el = document.getElementById('uploadToast');
   if (el) el.style.display = 'none';
 }
+// 舊名稱保留相容（apiUploadFile 等原本呼叫這兩個名字的地方不用全部改）
+function showUploadToast() { showBusyToast('檔案上傳中...'); }
+function hideUploadToast() { hideBusyToast(); }
 
 // 各資料類型 <-> Google試算表分頁欄位對應
 function equipToRow(r) { return { '設備ID': r.id||'', '類別': r.category, '設備名稱/編號': r.name, '安裝位置': r.location, '型號/廠牌': r.model, '安裝日期': r.installDate, '保固期限': r.warranty, '最近維護日期': r.lastMaintenance, '目前狀態': r.status, '負責廠商/人員': r.vendor, '備註': r.note }; }
@@ -3789,10 +3815,10 @@ function showDutyForm(id, presetDate) {
       </select></label>
       <label class="field"><span class="field-label mono">代班人員（請假時填寫）</span><input class="input" id="du-backup" list="duty-people-list" value="${item?esc(item.backup):''}" placeholder="選填"></label>
       <label class="field"><span class="field-label mono">備註</span><input class="input" id="du-note" value="${item?esc(item.note):''}" placeholder="選填"></label>
-      <div class="row-end"><button class="btn primary" onclick="saveDuty()">儲存</button></div>
+      <div class="row-end"><button class="btn primary" id="du-save-btn" onclick="saveDuty(this)">儲存</button></div>
     </div>`);
 }
-async function saveDuty() {
+async function saveDuty(btn) {
   const idVal = document.getElementById('du-id').value;
   const rec = {
     id: idVal || undefined,
@@ -3803,8 +3829,14 @@ async function saveDuty() {
     note: document.getElementById('du-note').value.trim(),
   };
   if (!rec.date || !rec.person) { alert('請填寫日期與值班人員'); return; }
+  const originalLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中...'; }
   try { await apiUpsert(SHEET_MAP.duty.sheet, SHEET_MAP.duty.toRow(rec)); await reloadOne('duty'); }
-  catch (err) { alert('儲存失敗：' + err + '\n（若是第一次使用，請確認 Google 試算表已新增「監看值班表」分頁）'); return; }
+  catch (err) {
+    alert('儲存失敗：' + err + '\n（若是第一次使用，請確認 Google 試算表已新增「監看值班表」分頁）');
+    if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    return;
+  }
   closeModal(); render();
 }
 function confirmDelDuty(id) { confirmDialog('確定要刪除這筆排班嗎？', `doDelDuty('${id}')`); }
