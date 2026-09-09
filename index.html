@@ -69,6 +69,16 @@ body {
 .pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; font-family: monospace; }
 .pill-green { background: rgba(51,209,122,.12); color: var(--green); border: 1px solid rgba(51,209,122,.4); }
 .pill-red { background: rgba(255,90,95,.12); color: var(--red); border: 1px solid rgba(255,90,95,.4); }
+.pill-amber { background: rgba(255,176,32,.14); color: #B4790A; border: 1px solid rgba(255,176,32,.5); }
+
+/* 路由器更換表：統計卡片＋進度條 */
+.stat-num { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+.progress-card { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px; margin-bottom: 24px; }
+.progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; font-size: 13px; }
+.progress-track { height: 8px; border-radius: 999px; background: var(--bg-panel-2); overflow: hidden; }
+.progress-fill { height: 100%; background: var(--green); border-radius: 999px; }
+.site-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--bg-panel-2); color: var(--text-dim); }
 
 .light-row { display: flex; gap: 18px; font-size: 13px; flex-wrap: wrap; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
@@ -3500,6 +3510,7 @@ const NAV = [
   { key: 'monitor', label: '監看紀錄表' },
   { key: 'monitorSummary', label: '監看紀錄表月彙總' },
   { key: 'poe', label: 'POE抽查日誌' },
+  { key: 'router', label: '路由器更換表' },
   { key: 'taichung', label: '台中端' },
   { key: 'tongxiao', label: '通霄端' },
   { key: 'gps', label: 'GPS機台資料表' },
@@ -3555,6 +3566,7 @@ function render() {
   else if (state.page === 'monitor') c.innerHTML = renderMonitor();
   else if (state.page === 'monitorSummary') c.innerHTML = renderMonitorSummary();
   else if (state.page === 'poe') c.innerHTML = renderPoe();
+  else if (state.page === 'router') c.innerHTML = renderRouter();
   else if (state.page === 'taichung') c.innerHTML = renderEquip('台中端', 'equipTaichung');
   else if (state.page === 'tongxiao') c.innerHTML = renderEquip('通霄端', 'equipTongxiao');
   else if (state.page === 'gps') c.innerHTML = renderGps();
@@ -4206,6 +4218,114 @@ async function doClearMonitorMonthly(month) {
 }
 
 /* ============================= POE抽查日誌 ============================= */
+/* ============================= 路由器更換表 ============================= */
+// 目前先用固定資料呈現（跟 kai 給的 Excel 一致），之後要接雲端試算表即時同步時，
+// 把這個陣列換成 DB.xxx（透過 apiList('路由器更換表') 讀進來）即可，畫面邏輯不用大改。
+const ROUTER_DATA = [
+  {no:1,  site:'台中端', type:'固定式攝影機', code:'A-固-01', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:2,  site:'台中端', type:'固定式攝影機', code:'A-固-02', cur:'第一版', note:'',                                   next:'第二版', date:'9/4 更換4G route', status:'已更換'},
+  {no:3,  site:'台中端', type:'固定式攝影機', code:'A-固-03', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:4,  site:'台中端', type:'固定式攝影機', code:'A-固-04', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:5,  site:'台中端', type:'固定式攝影機', code:'A-固-05', cur:'第一版', note:'',                                   next:'第二版', date:'8/3',              status:'已更換'},
+  {no:6,  site:'台中端', type:'固定式攝影機', code:'A-固-06', cur:'第一版', note:'6/21',                               next:'',      date:'',                status:'未更換'},
+  {no:7,  site:'台中端', type:'固定式攝影機', code:'A-固-07', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:8,  site:'台中端', type:'固定式攝影機', code:'A-固-08', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:9,  site:'台中端', type:'固定式攝影機', code:'A-固-09', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:10, site:'台中端', type:'固定式攝影機', code:'A-固-10', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:11, site:'台中端', type:'固定式攝影機', code:'A-固-11', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:12, site:'台中端', type:'固定式攝影機', code:'A-固-12', cur:'第一版', note:'5/26 4G Router sim 卡增加金屬卡座', next:'',      date:'',                status:'未更換'},
+  {no:13, site:'台中端', type:'移動式攝影機', code:'A-移-01', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:14, site:'台中端', type:'移動式攝影機', code:'A-移-02', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:15, site:'台中端', type:'門禁攝影機',   code:'A-門禁攝影機01', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
+  {no:16, site:'台中端', type:'門禁攝影機',   code:'A-門禁攝影機02', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
+  {no:17, site:'台中端', type:'固定式攝影機', code:'A-固-01-2', cur:'第一版', note:'',                                 next:'',      date:'',                status:'未更換'},
+  {no:18, site:'通霄端', type:'固定式攝影機', code:'B-固-09', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:19, site:'通霄端', type:'固定式攝影機', code:'B-固-10', cur:'第一版', note:'',                                   next:'第二版', date:'8/7 更換4G route', status:'已更換'},
+  {no:20, site:'通霄端', type:'固定式攝影機', code:'B-固-11', cur:'第一版', note:'',                                   next:'第二版', date:'8/10更換4G route', status:'已更換'},
+  {no:21, site:'通霄端', type:'固定式攝影機', code:'B-固-12', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:22, site:'通霄端', type:'移動式攝影機', code:'B-移-03', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:23, site:'通霄端', type:'移動式攝影機', code:'B-移-04', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:24, site:'通霄端', type:'移動式攝影機', code:'B-移-05', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:25, site:'通霄端', type:'移動式攝影機', code:'B-移-06', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:26, site:'通霄端', type:'移動式攝影機', code:'B-移-07', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:27, site:'通霄端', type:'移動式攝影機', code:'B-移-08', cur:'第一版', note:'',                                   next:'',      date:'',                status:'未更換'},
+  {no:28, site:'通霄端', type:'門禁攝影機',   code:'B-門禁攝影機01', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
+  {no:29, site:'通霄端', type:'門禁攝影機',   code:'B-門禁攝影機02', cur:'第一版', note:'',                             next:'',      date:'',                status:'未更換'},
+];
+
+function routerStatusPill(status) {
+  const map = { '已更換':'pill-green', '未更換':'pill-red', '損壞待換':'pill-red', '已下單待貨':'pill-amber' };
+  return `<span class="pill ${map[status]||'pill-amber'}">${status}</span>`;
+}
+
+function renderRouter() {
+  window.__routerFilterSite = window.__routerFilterSite || '全部';
+  window.__routerFilterStatus = window.__routerFilterStatus || '全部';
+
+  const total = ROUTER_DATA.length;
+  const done = ROUTER_DATA.filter(r => r.status === '已更換').length;
+  const pending = ROUTER_DATA.filter(r => r.status === '未更換').length;
+  const tc = ROUTER_DATA.filter(r => r.site === '台中端').length;
+  const tx = ROUTER_DATA.filter(r => r.site === '通霄端').length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+
+  const statCards = [
+    { label: '設備總數', num: total, color: 'var(--text)' },
+    { label: '已更換', num: done, color: 'var(--green)' },
+    { label: '未更換', num: pending, color: 'var(--red)' },
+    { label: '台中端', num: tc, color: 'var(--accent)' },
+    { label: '通霄端', num: tx, color: 'var(--accent)' },
+  ].map(s => `<div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+    <div class="stat-num" style="color:${s.color}">${s.num}</div>
+    <div class="stat-label">${s.label}</div>
+  </div>`).join('');
+
+  const rows = ROUTER_DATA
+    .filter(r => (window.__routerFilterSite==='全部' || r.site===window.__routerFilterSite) && (window.__routerFilterStatus==='全部' || r.status===window.__routerFilterStatus))
+    .map(r => `<tr>
+      <td class="mono text-dim">${r.no}</td>
+      <td><span class="site-tag">${esc(r.site)}</span></td>
+      <td>${esc(r.type)}</td>
+      <td class="mono">${esc(r.code)}</td>
+      <td>${esc(r.cur)}</td>
+      <td>${r.next ? esc(r.next) : '<span class="text-dim">—</span>'}</td>
+      <td class="text-dim">${esc(r.date)||'—'}</td>
+      <td>${routerStatusPill(r.status)}</td>
+      <td class="text-dim">${esc(r.note)||'—'}</td>
+    </tr>`).join('') || `<tr><td colspan="9" class="text-dim" style="text-align:center;padding:20px;">沒有符合篩選條件的設備</td></tr>`;
+
+  return `
+  <h1 class="page-title">📡 路由器更換表</h1>
+  <p class="text-dim" style="margin:-12px 0 20px;font-size:13px;line-height:1.6;">目前全數安裝第一版路由器，廠商將陸續提供第二版機台，設備損壞或廠商更換時請於下表登記狀態與日期。</p>
+
+  <div class="grid-3">${statCards}</div>
+
+  <div class="progress-card">
+    <div class="progress-head"><span>整體更換進度</span><span class="mono" style="color:var(--green)">${done} / ${total}（${pct}%）</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+  </div>
+
+  <div class="section-head"><h2 class="section-title">設備清單</h2></div>
+  <div class="filter-row">
+    <span class="text-dim mono" style="font-size:12px;">站點篩選：</span>
+    <select class="input" style="width:120px" onchange="window.__routerFilterSite=this.value;render()">
+      <option ${window.__routerFilterSite==='全部'?'selected':''}>全部</option>
+      <option ${window.__routerFilterSite==='台中端'?'selected':''}>台中端</option>
+      <option ${window.__routerFilterSite==='通霄端'?'selected':''}>通霄端</option>
+    </select>
+    <span class="text-dim mono" style="font-size:12px;margin-left:8px;">狀態篩選：</span>
+    <select class="input" style="width:120px" onchange="window.__routerFilterStatus=this.value;render()">
+      <option ${window.__routerFilterStatus==='全部'?'selected':''}>全部</option>
+      <option ${window.__routerFilterStatus==='未更換'?'selected':''}>未更換</option>
+      <option ${window.__routerFilterStatus==='已更換'?'selected':''}>已更換</option>
+    </select>
+  </div>
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>序號</th><th>站點</th><th>設備類型</th><th>設備編號</th><th>目前版本</th><th>更換後版本</th><th>更換日期</th><th>狀態</th><th>備註</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
 function renderPoe() {
   window.__poeTab = window.__poeTab || 'check';
   const checks = DB.poeChecks;
