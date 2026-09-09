@@ -411,10 +411,15 @@ function toPreviewUrl(url) {
   if (m) return `https://docs.google.com/document/d/${m[1]}/preview`;
   return '';
 }
-// 把 Google Drive 的「檢視連結」(.../file/d/ID/view) 轉成「直接下載連結」，
-// 點擊後才會真的觸發瀏覽器下載檔案到電腦，而不是進到雲端硬碟線上預覽頁。
+// 把 Google Drive 的「檢視連結」轉成「直接下載連結」，
+// 點擊後才會真的觸發瀏覽器下載檔案到電腦，而不是進到雲端硬碟／文件線上檢視頁。
 function toDriveDownloadUrl(url) {
   if (!url) return '';
+  // 上傳的 .doc/.docx 如果被 Google 自動轉成 Google 文件格式，連結會是
+  // .../document/d/ID/edit 這種形式，要用 export 端點強制輸出成 .docx 才會觸發下載，
+  // 不然點下去只會打開線上編輯畫面（就是使用者截圖看到的狀況）。
+  const docMatch = url.match(/\/document\/d\/([^\/]+)/);
+  if (docMatch) return `https://docs.google.com/document/d/${docMatch[1]}/export?format=docx`;
   const m = url.match(/\/file\/d\/([^\/]+)/) || url.match(/[?&]id=([^&]+)/);
   if (m) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
   return url;
