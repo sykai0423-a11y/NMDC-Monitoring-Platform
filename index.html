@@ -35,7 +35,7 @@ body {
 .brand-title { font-weight: 700; font-size: 15px; }
 .brand-sub { font-size: 10px; color: var(--text-dim); }
 .nav-list { display: flex; flex-direction: column; gap: 4px; }
-.nav-item { display: flex; align-items: center; gap: 10px; background: transparent; border: 1px solid transparent; color: var(--text-dim); padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; width: 100%; }
+.nav-item { display: flex; align-items: center; gap: 10px; background: transparent; border: 1px solid transparent; color: var(--text-dim); padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; width: 100%; text-decoration: none; box-sizing: border-box; }
 .nav-item:hover { background: var(--bg-panel-2); color: var(--text); }
 .nav-item.active { background: rgba(79,124,255,.08); color: var(--accent); border-color: rgba(79,124,255,.35); }
 
@@ -3522,11 +3522,15 @@ const NAV = [
   { key: 'ppe', label: '個人防護具' },
   { key: 'coverall', label: 'NMDC Coverall' },
   { key: 'worktasks', label: '工作事項分類表' },
+  // 外部系統連結：點了直接開新分頁前往，不是平台內的頁面，所以用 href 而不是 key。
+  { href: 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-taichung', label: '空氣站資訊（台中）' },
+  { href: 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-tongxiao', label: '空氣站資訊（通霄）' },
 ];
 
 function renderNav() {
-  document.getElementById('navList').innerHTML = NAV.map(n =>
-    `<button class="nav-item ${state.page===n.key?'active':''}" onclick="goPage('${n.key}')"><span>${n.label}</span></button>`
+  document.getElementById('navList').innerHTML = NAV.map(n => n.href
+    ? `<a class="nav-item" href="${n.href}" target="_blank" rel="noopener"><span>${n.label} ↗</span></a>`
+    : `<button class="nav-item ${state.page===n.key?'active':''}" onclick="goPage('${n.key}')"><span>${n.label}</span></button>`
   ).join('');
   document.getElementById('topbarTitle').textContent = NAV.find(n=>n.key===state.page).label;
 }
