@@ -3522,9 +3522,9 @@ const NAV = [
   { key: 'ppe', label: '個人防護具' },
   { key: 'coverall', label: 'NMDC Coverall' },
   { key: 'worktasks', label: '工作事項分類表' },
-  // 外部系統連結：點了直接開新分頁前往，不是平台內的頁面，所以用 href 而不是 key。
-  { href: 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-taichung', label: '空氣站資訊（台中）' },
-  { href: 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-tongxiao', label: '空氣站資訊（通霄）' },
+  // 外部系統：改成右側內嵌顯示，不跳新分頁，所以用 key（跟其他頁面一樣）。
+  { key: 'airTaichung', label: '空氣站資訊（台中）' },
+  { key: 'airTongxiao', label: '空氣站資訊（通霄）' },
 ];
 
 function renderNav() {
@@ -3582,6 +3582,8 @@ function render() {
   else if (state.page === 'ppe') { c.innerHTML = renderPpe(); const f = document.getElementById('ppeFrame'); if (f) f.srcdoc = PPE_HTML; }
   else if (state.page === 'coverall') { c.innerHTML = renderCoverall(); const cf = document.getElementById('coverallFrame'); if (cf) cf.srcdoc = COVERALL_HTML; }
   else if (state.page === 'worktasks') { c.innerHTML = renderWorktasks(); const wf = document.getElementById('worktasksFrame'); if (wf) wf.srcdoc = WORKTASKS_HTML; }
+  else if (state.page === 'airTaichung') c.innerHTML = renderAirStation('空氣站資訊（台中）', 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-taichung');
+  else if (state.page === 'airTongxiao') c.innerHTML = renderAirStation('空氣站資訊（通霄）', 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-tongxiao');
 }
 
 /* ============================= Dashboard ============================= */
@@ -5026,6 +5028,14 @@ function renderWorktasks() {
   <h1 class="page-title">工作事項分類表</h1>
   <p class="text-dim" style="margin-bottom:12px;">此模組資料獨立於 CCTV 平台，勾選狀態與欄位設定會同步存至雲端。</p>
   <iframe id="worktasksFrame" class="ppe-frame"></iframe>`;
+}
+
+/* ============================= 空氣站資訊（外部系統內嵌） ============================= */
+function renderAirStation(title, url) {
+  return `
+  <h1 class="page-title">🌫️ ${esc(title)}</h1>
+  <p class="text-dim" style="margin-bottom:12px;">此頁面為外部系統內嵌顯示，資料以該系統為準。若畫面空白或無法顯示，可能是對方系統不允許內嵌，<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--accent);">點此開新分頁前往</a>。</p>
+  <iframe src="${esc(url)}" class="ppe-frame"></iframe>`;
 }
 
 /* ============================= Excel 匯出 / 匯入 ============================= */
