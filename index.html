@@ -70,6 +70,7 @@ body {
 .pill-green { background: rgba(51,209,122,.12); color: var(--green); border: 1px solid rgba(51,209,122,.4); }
 .pill-red { background: rgba(255,90,95,.12); color: var(--red); border: 1px solid rgba(255,90,95,.4); }
 .pill-amber { background: rgba(255,176,32,.14); color: #B4790A; border: 1px solid rgba(255,176,32,.5); }
+.pill-gray { background: rgba(140,140,150,.14); color: #6b6b76; border: 1px solid rgba(140,140,150,.4); }
 
 /* 路由器更換表：統計卡片＋進度條 */
 .stat-num { font-size: 26px; font-weight: 700; line-height: 1.1; }
@@ -372,6 +373,9 @@ const SHEET_MAP = {
 };
 
 // 監看紀錄表：以日期為主鍵，獨立處理
+// 「未出工」標記：現場當天沒有出工，不需要監看紀錄，就把檔名寫成這個固定值、連結留空，
+// 藉此沿用同一張表（不用另外加欄位），畫面判斷時只要比對檔名是不是這個值即可。
+const MONITOR_NO_WORK = '未出工';
 async function apiListMonitor() {
   const rows = await apiList('監看紀錄表');
   const obj = {};
@@ -3984,13 +3988,14 @@ function renderMonitor() {
   for (let d = daysInMonth; d >= 1; d--) {
     const key = dateKey(d);
     const rec = files[key];
-    const has = !!rec;
+    const noWork = !!rec && rec.filename === MONITOR_NO_WORK;
+    const has = !!rec && !noWork;
     const isToday = key === todayStr();
     const sel = state.monitorSelected === key;
     const wd = weekLabel[new Date(year, month, d).getDay()];
     const checked = state.monitorDownloadSelected.has(key);
     rows.push(`<div class="monitor-row ${sel?'selected':''} ${isToday?'today':''}" onclick="selectMonitorDate('${key}')">
-      <label class="monitor-row-check" onclick="event.stopPropagation()" title="${has?'勾選以加入批次下載':'此日期尚無檔案，無法下載'}">
+      <label class="monitor-row-check" onclick="event.stopPropagation()" title="${has?'勾選以加入批次下載':'此日期無檔案，無法下載'}">
         <input type="checkbox" ${checked?'checked':''} ${has?'':'disabled'} onchange="toggleMonitorDownload('${key}')">
       </label>
       <div class="monitor-row-main">
@@ -3998,7 +4003,7 @@ function renderMonitor() {
           <span class="mono">${key}</span><span class="text-dim" style="font-size:11px;">週${wd}${isToday?'・今天':''}</span>
         </div>
         <div class="monitor-row-status">
-          ${has ? `<span class="pill pill-green">已上傳</span><span class="text-dim" style="font-size:12px;">${esc(rec.filename)}</span>` : `<span class="pill pill-red">未上傳</span>`}
+          ${has ? `<span class="pill pill-green">已上傳</span><span class="text-dim" style="font-size:12px;">${esc(rec.filename)}</span>` : noWork ? `<span class="pill pill-gray">未出工</span>` : `<span class="pill pill-red">未上傳</span>`}
         </div>
       </div>
     </div>`);
@@ -4013,7 +4018,8 @@ function renderMonitor() {
   let detail = '';
   if (state.monitorSelected) {
     const rec = files[state.monitorSelected];
-    if (rec) {
+    const noWorkSel = !!rec && rec.filename === MONITOR_NO_WORK;
+    if (rec && !noWorkSel) {
       const previewUrl = toPreviewUrl(rec.fileUrl);
       const uploadTimeStr = rec.uploadTime ? new Date(rec.uploadTime).toLocaleString('zh-TW') : '—';
       detail = `<div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
@@ -4026,11 +4032,24 @@ function renderMonitor() {
         </div>
         ${previewUrl ? `<iframe src="${previewUrl}" style="width:100%;height:480px;border:1px solid var(--line);border-radius:4px;background:#fff;margin-top:14px;"></iframe>` : `<p class="text-dim" style="margin-top:12px;">此檔案無法預覽，請點上方按鈕開啟。</p>`}
       </div>`;
+    } else if (noWorkSel) {
+      detail = `<div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+        <div class="card-head"><span>${state.monitorSelected}</span></div>
+        <p><span class="pill pill-gray">未出工</span></p>
+        <p class="text-dim" style="margin-top:8px;">此日期現場無出工，無需監看紀錄。</p>
+        <div class="row-end" style="margin-top:12px;">
+          <button class="btn ghost" onclick="confirmCancelNoWork('${state.monitorSelected}')">取消標記</button>
+          <button class="btn primary" onclick="document.getElementById('monitorFileInput').click()">改為上傳檔案</button>
+        </div>
+      </div>`;
     } else {
       detail = `<div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
         <div class="card-head"><span>${state.monitorSelected}</span></div>
         <p class="text-dim">此日期尚無檔案</p>
-        <button class="btn primary" onclick="document.getElementById('monitorFileInput').click()">上傳檔案</button>
+        <div class="row-end" style="margin-top:12px;">
+          <button class="btn ghost" onclick="markMonitorNoWork('${state.monitorSelected}')">標記為未出工</button>
+          <button class="btn primary" onclick="document.getElementById('monitorFileInput').click()">上傳檔案</button>
+        </div>
       </div>`;
     }
   } else {
@@ -4102,6 +4121,29 @@ async function doMonitorUploadWith(date, file, overwriteCount) {
   }
   renderPreserveScroll();
 }
+// 標記「未出工」：現場當天無人出工、不需要監看紀錄，登記後該日期就不會再出現在「缺件提醒」清單。
+async function markMonitorNoWork(date) {
+  try {
+    await apiSaveMonitor(date, MONITOR_NO_WORK, '', 0);
+    await reloadOne('monitorFiles');
+  } catch (err) {
+    alert('❌ 標記失敗：\n' + err);
+  }
+  renderPreserveScroll();
+}
+function confirmCancelNoWork(date) {
+  confirmDialog(`確定要取消 ${date} 的「未出工」標記嗎？`, `doCancelNoWork('${date}')`);
+}
+async function doCancelNoWork(date) {
+  try {
+    await apiDelete('監看紀錄表', date);
+    await reloadOne('monitorFiles');
+  } catch (err) {
+    alert('❌ 取消失敗：\n' + err);
+  }
+  closeModal();
+  renderPreserveScroll();
+}
 function downloadMonitorFile(date) {
   const rec = DB.monitorFiles[date];
   if (!rec || !rec.fileUrl) return;
@@ -4116,7 +4158,8 @@ function selectAllMonitorInMonth(year, month) {
   const daysInMonth = new Date(year, month+1, 0).getDate();
   for (let d = 1; d <= daysInMonth; d++) {
     const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    if (DB.monitorFiles[key]) state.monitorDownloadSelected.add(key);
+    const rec = DB.monitorFiles[key];
+    if (rec && rec.filename !== MONITOR_NO_WORK) state.monitorDownloadSelected.add(key);
   }
   renderPreserveScroll();
 }
