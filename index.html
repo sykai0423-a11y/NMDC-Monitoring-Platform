@@ -1644,7 +1644,7 @@ async function handlePpeCountImport(event) {
   }
   const parsed = parseCountFile(wb);
   if (!parsed) {
-    alert('在這份 Excel 裡找不到可辨識的「品項名稱」＋「盤點數量／目前庫存」欄位。\n\n可以用「下載盤點表」產生的範本填寫後再上傳，或使用含「目前庫存」欄位的品項清單。');
+    alert('在這份 Excel 裡找不到可辨識的「品項名稱」＋「盤點數量／目前庫存」欄位。\\n\\n可以用「下載盤點表」產生的範本填寫後再上傳，或使用含「目前庫存」欄位的品項清單。');
     return;
   }
   const diffs = [];
@@ -1660,7 +1660,7 @@ async function handlePpeCountImport(event) {
   });
   if (diffs.length === 0) {
     alert(unmatched.length
-      ? '沒有需要調整的品項。\n\n另外有 ' + unmatched.length + ' 個品項在系統中找不到對應名稱：\n' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':'')
+      ? '沒有需要調整的品項。\\n\\n另外有 ' + unmatched.length + ' 個品項在系統中找不到對應名稱：\\n' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':'')
       : '沒有需要調整的品項，系統庫存與盤點結果一致 ✅');
     return;
   }
