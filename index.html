@@ -756,10 +756,12 @@ const PPE_HTML = `<!DOCTYPE html>
 
         <div class="export-card">
           <div class="export-icon">✏️</div>
-          <div class="export-title">備份：空白盤點表</div>
-          <div class="export-desc">產生含所有品項的空白盤點 Excel，有「預期數量」與「實際清點」兩欄，方便現場填寫後回傳。</div>
+          <div class="export-title">盤點匯入</div>
+          <div class="export-desc">下載盤點表現場清點填數字，或直接把清點好的 Excel（含「品項名稱」＋「目前庫存／實際清點」欄位）上傳，系統會自動比對差異、產生「盤點調整」紀錄，不用再手動一筆筆輸入。</div>
           <div class="export-preview">包含所有 <b id="prev-count-count">0</b> 個品項</div>
           <button class="btn export-btn" onclick="exportCountSheet()">⬇ 下載盤點表</button>
+          <button class="btn btn-accent export-btn" style="margin-top:8px;" onclick="document.getElementById('count-import-input').click()">⬆ 上傳盤點結果</button>
+          <input type="file" id="count-import-input" accept=".xlsx,.xls" style="display:none" onchange="handlePpeCountImport(event)">
         </div>
 
         <div class="export-card">
@@ -901,6 +903,30 @@ const PPE_HTML = `<!DOCTYPE html>
     <div class="modal-actions">
       <button class="btn" onclick="closeDelModal()">取消</button>
       <button class="btn btn-danger" id="del-submit-btn" onclick="confirmDelete(this)">確認刪除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 盤點匯入 Modal -->
+<div class="overlay" id="count-overlay" onclick="closeCountOutside(event)">
+  <div class="modal" style="width:640px;max-width:95vw;max-height:82vh;overflow-y:auto;">
+    <h2>盤點匯入 － 確認調整</h2>
+    <div class="modal-sub" id="count-sub"></div>
+    <div class="table-wrap" style="margin-bottom:12px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:var(--bg);">
+          <th style="text-align:left;padding:8px;">品項</th>
+          <th style="text-align:right;padding:8px;">系統庫存</th>
+          <th style="text-align:right;padding:8px;">盤點數量</th>
+          <th style="text-align:right;padding:8px;">差異</th>
+        </tr></thead>
+        <tbody id="count-diff-body"></tbody>
+      </table>
+    </div>
+    <div id="count-unmatched" class="modal-sub" style="color:var(--low);"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeCountModal()">取消</button>
+      <button class="btn btn-accent" id="count-submit-btn" onclick="submitCountImport(this)">確認套用</button>
     </div>
   </div>
 </div>
@@ -1580,6 +1606,100 @@ function downloadXlsx(rows, sheetName, filename, opts) {
 
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
   XLSX.writeFile(wb, filename);
+}
+
+// ── 盤點匯入：上傳清點好的 Excel，自動比對系統庫存與清點數量的差異 ──
+// 支援兩種欄位格式：①「下載盤點表」範本（品項名稱 + 實際清點（件）），
+// ②含「目前庫存」欄位的品項清單（例如自己另外維護的 Excel 匯出檔）。
+// 找不到對應品項名稱的列會列在「未比對到」清單，不會被更動；比對到但數量相同的列也不會產生任何異動。
+function parseCountFile(wb) {
+  const NAME_KEYS = ['品項名稱', '品項'];
+  const QTY_KEYS = ['實際清點（件）', '實際清點(件)', '實際清點', '盤點數量', '目前庫存'];
+  let best = null;
+  wb.SheetNames.forEach(sn => {
+    let json;
+    try { json = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' }); } catch (e) { return; }
+    if (!json.length) return;
+    const headers = Object.keys(json[0]);
+    const nameKey = NAME_KEYS.find(k => headers.includes(k));
+    const qtyKey = QTY_KEYS.find(k => headers.includes(k));
+    if (!nameKey || !qtyKey) return;
+    const rows = json.map(r => ({ name: String(r[nameKey]||'').trim(), counted: r[qtyKey] })).filter(r => r.name);
+    if (!best || rows.length > best.rows.length) best = { sheetName: sn, rows };
+  });
+  return best;
+}
+async function handlePpeCountImport(event) {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { showToast('Excel 套件載入中，請稍後再試…'); return; }
+  let wb;
+  try {
+    const buf = await file.arrayBuffer();
+    wb = XLSX.read(buf, { type: 'array' });
+  } catch (err) {
+    alert('讀取檔案失敗：' + (err && err.message ? err.message : err));
+    return;
+  }
+  const parsed = parseCountFile(wb);
+  if (!parsed) {
+    alert('在這份 Excel 裡找不到可辨識的「品項名稱」＋「盤點數量／目前庫存」欄位。\n\n可以用「下載盤點表」產生的範本填寫後再上傳，或使用含「目前庫存」欄位的品項清單。');
+    return;
+  }
+  const diffs = [];
+  const unmatched = [];
+  parsed.rows.forEach(r => {
+    const counted = r.counted;
+    if (counted === '' || counted === null || counted === undefined || isNaN(Number(counted))) return; // 空白格代表現場沒填，跳過不處理
+    const item = inventory.find(i => i.name === r.name);
+    if (!item) { unmatched.push(r.name); return; }
+    const countedNum = Math.round(Number(counted));
+    const delta = countedNum - item.qty;
+    if (delta !== 0) diffs.push({ item, before: item.qty, after: countedNum, delta });
+  });
+  if (diffs.length === 0) {
+    alert(unmatched.length
+      ? '沒有需要調整的品項。\n\n另外有 ' + unmatched.length + ' 個品項在系統中找不到對應名稱：\n' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':'')
+      : '沒有需要調整的品項，系統庫存與盤點結果一致 ✅');
+    return;
+  }
+  showCountImportPreview(diffs, unmatched);
+}
+let pendingCountDiffs = [];
+function showCountImportPreview(diffs, unmatched) {
+  pendingCountDiffs = diffs;
+  document.getElementById('count-sub').textContent = '共比對出 ' + diffs.length + ' 個品項數量有差異，確認後會依序寫入「盤點調整」異動紀錄並更新庫存（原本的歷史紀錄不會被刪除或覆蓋）。';
+  document.getElementById('count-diff-body').innerHTML = diffs.map(function(d) {
+    return '<tr style="border-top:1px solid var(--border);">'
+      + '<td style="padding:8px;">' + d.item.name + '</td>'
+      + '<td style="padding:8px;text-align:right;">' + d.before + '</td>'
+      + '<td style="padding:8px;text-align:right;">' + d.after + '</td>'
+      + '<td style="padding:8px;text-align:right;color:' + (d.delta>0?'#1D9E75':'#E24B4A') + ';">' + (d.delta>0?'+':'') + d.delta + '</td>'
+      + '</tr>';
+  }).join('');
+  const um = document.getElementById('count-unmatched');
+  um.textContent = unmatched.length ? ('⚠ 有 ' + unmatched.length + ' 個品項在系統中找不到對應名稱，未列入調整：' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':'')) : '';
+  document.getElementById('count-overlay').classList.add('open');
+}
+function closeCountModal() { document.getElementById('count-overlay').classList.remove('open'); pendingCountDiffs = []; }
+function closeCountOutside(e) { if (e.target === document.getElementById('count-overlay')) closeCountModal(); }
+async function submitCountImport(btn) {
+  if (!pendingCountDiffs.length) { closeCountModal(); return; }
+  const diffs = pendingCountDiffs;
+  await withButton(btn, '寫入中...', async () => {
+    const person = getCurrentUser();
+    for (const d of diffs) {
+      try {
+        await commitTransaction(d.item, d.delta, '盤點調整', person, '盤點匯入自動產生');
+      } catch (err) {
+        console.error('盤點調整寫入失敗：', d.item.name, err);
+      }
+    }
+  });
+  renderAll();
+  closeCountModal();
+  showToast('盤點匯入完成，已調整 ' + diffs.length + ' 個品項');
 }
 
 // ── 啟動：先把三個雲端分頁的資料抓下來，再畫畫面 ──
