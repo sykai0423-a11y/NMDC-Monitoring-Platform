@@ -748,10 +748,12 @@ const PPE_HTML = `<!DOCTYPE html>
 
         <div class="export-card">
           <div class="export-icon">📈</div>
-          <div class="export-title">備份：異動紀錄</div>
-          <div class="export-desc">下載所有進貨與領取的歷史紀錄，包含時間、人員、品項與前後庫存量。</div>
+          <div class="export-title">異動紀錄同步</div>
+          <div class="export-desc">下載所有進貨與領取的歷史紀錄，包含時間、人員、品項與前後庫存量。如果你有時候會先把新紀錄手動寫在 Excel 裡，填好後可以直接在這裡上傳，系統會自動比對、只把系統裡還沒有的新紀錄補進來，已經同步過的不會重複新增。</div>
           <div class="export-preview">共 <b id="prev-log-count">0</b> 筆紀錄</div>
           <button class="btn btn-accent export-btn" onclick="exportLogs()">⬇ 下載異動紀錄</button>
+          <button class="btn export-btn" style="margin-top:8px;" onclick="document.getElementById('log-import-input').click()">⬆ 上傳異動紀錄</button>
+          <input type="file" id="log-import-input" accept=".xlsx,.xls" style="display:none" onchange="handlePpeLogImport(event)">
         </div>
 
         <div class="export-card">
@@ -927,6 +929,31 @@ const PPE_HTML = `<!DOCTYPE html>
     <div class="modal-actions">
       <button class="btn" onclick="closeCountModal()">取消</button>
       <button class="btn btn-accent" id="count-submit-btn" onclick="submitCountImport(this)">確認套用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 異動紀錄匯入 Modal -->
+<div class="overlay" id="log-import-overlay" onclick="closeLogImportOutside(event)">
+  <div class="modal" style="width:680px;max-width:95vw;max-height:82vh;overflow-y:auto;">
+    <h2>異動紀錄匯入 － 確認新增</h2>
+    <div class="modal-sub" id="log-import-sub"></div>
+    <div class="table-wrap" style="margin-bottom:12px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:var(--bg);">
+          <th style="text-align:left;padding:8px;">時間</th>
+          <th style="text-align:left;padding:8px;">類型</th>
+          <th style="text-align:left;padding:8px;">品項</th>
+          <th style="text-align:right;padding:8px;">數量</th>
+          <th style="text-align:left;padding:8px;">人員/事由</th>
+        </tr></thead>
+        <tbody id="log-import-body"></tbody>
+      </table>
+    </div>
+    <div id="log-import-warn" class="modal-sub" style="color:var(--low);"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeLogImportModal()">取消</button>
+      <button class="btn btn-accent" id="log-import-submit-btn" onclick="submitLogImport(this)">確認新增</button>
     </div>
   </div>
 </div>
@@ -1700,6 +1727,149 @@ async function submitCountImport(btn) {
   renderAll();
   closeCountModal();
   showToast('盤點匯入完成，已調整 ' + diffs.length + ' 個品項');
+}
+
+// ── 異動紀錄匯入：如果你有時候是先把新的進貨/領取寫在 Excel 裡，再用這個功能一次同步 ──
+// 因為 Excel 裡的每一列沒有系統的「紀錄ID」，比對重複只能靠「時間＋品項＋數量＋人員」四個欄位
+// 是否完全一樣：一樣的話視為已經同步過（跳過，不重複新增），不一樣才當成新紀錄寫入。
+// 所以上傳前系統會先列出「即將新增」的清單讓你確認一次，不會靜默寫入。
+function normalizeExcelTime(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) return fmtTime(v);
+  if (v == null || v === '') return '';
+  const s = String(v).trim();
+  const m = s.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})(?:[ T](\\d{1,2}):(\\d{1,2}))?/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]), Number(m[4]||0), Number(m[5]||0));
+    if (!isNaN(d.getTime())) return fmtTime(d);
+  }
+  return s;
+}
+function txSignature(time, name, delta, person) {
+  return time + '|' + name + '|' + Math.round(Number(delta)||0) + '|' + String(person||'').trim();
+}
+function parseTransactionFile(wb) {
+  const REQUIRED = ['時間', '類型', '品項名稱', '異動數量'];
+  let best = null;
+  wb.SheetNames.forEach(sn => {
+    let json;
+    try { json = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' }); } catch (e) { return; }
+    if (!json.length) return;
+    const headers = Object.keys(json[0]);
+    if (!REQUIRED.every(k => headers.includes(k))) return;
+    const rows = json.map(r => ({
+      time: normalizeExcelTime(r['時間']),
+      typeLabel: String(r['類型']||'').trim(),
+      name: String(r['品項名稱']||'').trim(),
+      delta: r['異動數量'],
+      person: String(r['人員/事由']||r['人員或事由']||'').trim(),
+      note: String(r['備註']||'').trim()
+    })).filter(r => r.name && r.time);
+    if (!best || rows.length > best.rows.length) best = { sheetName: sn, rows };
+  });
+  return best;
+}
+async function handlePpeLogImport(event) {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { showToast('Excel 套件載入中，請稍後再試…'); return; }
+  let wb;
+  try {
+    const buf = await file.arrayBuffer();
+    wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  } catch (err) {
+    alert('讀取檔案失敗：' + (err && err.message ? err.message : err));
+    return;
+  }
+  const parsed = parseTransactionFile(wb);
+  if (!parsed) {
+    alert('在這份 Excel 裡找不到可辨識的「時間／類型／品項名稱／異動數量」欄位。\\n\\n請確認格式跟「下載異動紀錄」的備份範本一致。');
+    return;
+  }
+  const existingKeys = new Set(logs.map(l => txSignature(l.time, l.name, l.delta, l.person)));
+  const toImport = [];
+  let skippedCount = 0;
+  const unmatched = [];
+  let invalidCount = 0;
+  parsed.rows.forEach(r => {
+    const delta = Number(r.delta);
+    if (!r.time || isNaN(delta) || delta === 0) { invalidCount++; return; }
+    const item = inventory.find(i => i.name === r.name);
+    if (!item) { unmatched.push(r.name); return; }
+    const deltaRounded = Math.round(delta);
+    const sig = txSignature(r.time, r.name, deltaRounded, r.person);
+    if (existingKeys.has(sig)) { skippedCount++; return; }
+    toImport.push({ item, time: r.time, typeLabel: r.typeLabel || (deltaRounded>=0?'進貨':'領取'), person: r.person, note: r.note, delta: deltaRounded });
+  });
+  if (toImport.length === 0) {
+    alert('沒有需要新增的紀錄（共比對 ' + parsed.rows.length + ' 筆，其中 ' + skippedCount + ' 筆系統已有、' + unmatched.length + ' 筆品項名稱對不到、' + invalidCount + ' 筆時間或數量格式看不懂）。');
+    return;
+  }
+  showLogImportPreview(toImport, skippedCount, unmatched, invalidCount);
+}
+let pendingLogImports = [];
+function showLogImportPreview(toImport, skippedCount, unmatched, invalidCount) {
+  toImport.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
+  pendingLogImports = toImport;
+  let subText = '共比對出 ' + toImport.length + ' 筆是系統裡還沒有的新紀錄，確認後會依序寫入「異動紀錄」並更新對應品項的庫存。';
+  if (skippedCount) subText += '（另有 ' + skippedCount + ' 筆內容與系統已有的紀錄完全相同，視為已同步過，不會重複新增。）';
+  // 安全提醒：這個功能是設計給「最近才手動記在 Excel、還沒同步」的少數幾筆用的。
+  // 如果清單裡出現很久以前的日期，很可能是不小心上傳了完整的舊版歷史 Excel，
+  // 舊資料若跟系統當初匯入時的格式有出入（比對不到），就會被誤判成新紀錄、重複計入庫存異動。
+  const earliest = toImport.length ? toImport[0].time : '';
+  const earliestDate = earliest ? new Date(earliest.replace(/\\//g, '-').replace(' ', 'T')) : null;
+  const daysAgo = earliestDate && !isNaN(earliestDate.getTime()) ? Math.floor((Date.now() - earliestDate.getTime()) / 86400000) : null;
+  let warnHtml = '';
+  if (daysAgo !== null && daysAgo > 3) {
+    warnHtml = '<div style="color:var(--zero);font-weight:600;margin-bottom:8px;">⚠️ 清單中最早的一筆是 ' + earliest + '（' + daysAgo + ' 天前），這個功能只適合同步「最近才手寫在 Excel、還沒同步」的少數幾筆。如果你是不小心上傳了完整的舊版歷史 Excel，請先按取消，只保留真的還沒同步過的那幾筆再重新上傳，避免舊資料被重複計入庫存。</div>';
+  }
+  document.getElementById('log-import-sub').innerHTML = warnHtml + subText;
+  document.getElementById('log-import-body').innerHTML = toImport.map(function(r) {
+    return '<tr style="border-top:1px solid var(--border);">'
+      + '<td style="padding:8px;">' + r.time + '</td>'
+      + '<td style="padding:8px;">' + r.typeLabel + '</td>'
+      + '<td style="padding:8px;">' + r.item.name + '</td>'
+      + '<td style="padding:8px;text-align:right;color:' + (r.delta>0?'#1D9E75':'#E24B4A') + ';">' + (r.delta>0?'+':'') + r.delta + '</td>'
+      + '<td style="padding:8px;">' + r.person + '</td>'
+      + '</tr>';
+  }).join('');
+  const warn = [];
+  if (unmatched.length) warn.push('⚠ 有 ' + unmatched.length + ' 個品項名稱在系統中找不到對應，未列入：' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':''));
+  if (invalidCount) warn.push('⚠ 有 ' + invalidCount + ' 筆時間或數量格式看不懂，已略過');
+  document.getElementById('log-import-warn').textContent = warn.join('　');
+  document.getElementById('log-import-overlay').classList.add('open');
+}
+function closeLogImportModal() { document.getElementById('log-import-overlay').classList.remove('open'); pendingLogImports = []; }
+function closeLogImportOutside(e) { if (e.target === document.getElementById('log-import-overlay')) closeLogImportModal(); }
+// 跟 commitTransaction 幾乎一樣，差別只在時間用 Excel 原本記錄的時間，不是「現在」。
+async function commitImportedTransaction(item, delta, typeLabel, person, note, time) {
+  const prev = item.qty;
+  const after = prev + delta;
+  const log = { id: uid('r'), time: time, typeLabel: typeLabel, name: item.name,
+                delta: delta, qty: Math.abs(delta), person: person || '', note: note || '', prev: prev, after: after };
+  await ppeApiUpsert(SHEET_LOGS, logToRow(log));
+  const updated = Object.assign({}, item, { qty: after });
+  await ppeApiUpsert(SHEET_ITEMS, itemToRow(updated));
+  item.qty = after;
+  logs.push(log);
+  return log;
+}
+async function submitLogImport(btn) {
+  if (!pendingLogImports.length) { closeLogImportModal(); return; }
+  const items = pendingLogImports;
+  await withButton(btn, '寫入中...', async () => {
+    for (const r of items) {
+      const noteText = (r.note ? r.note + '　' : '') + '(Excel 匯入同步)';
+      try {
+        await commitImportedTransaction(r.item, r.delta, r.typeLabel, r.person, noteText, r.time);
+      } catch (err) {
+        console.error('匯入異動紀錄失敗：', r.item.name, err);
+      }
+    }
+  });
+  renderAll();
+  closeLogImportModal();
+  showToast('已匯入 ' + items.length + ' 筆異動紀錄');
 }
 
 // ── 啟動：先把三個雲端分頁的資料抓下來，再畫畫面 ──
