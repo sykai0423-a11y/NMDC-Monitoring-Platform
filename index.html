@@ -820,6 +820,11 @@ const PPE_HTML = `<!DOCTYPE html>
       <input type="number" min="1" class="form-input" id="inp-qty" value="1">
     </div>
     <div class="form-group">
+      <label class="form-label">日期時間</label>
+      <input type="datetime-local" class="form-input" id="inp-time">
+      <div style="font-size:12px;margin-top:4px;color:var(--text-muted);">預設是現在，如果要補登之前的紀錄，可以改成實際發生的日期時間。</div>
+    </div>
+    <div class="form-group">
       <label class="form-label">人員 / 事由</label>
       <input type="text" class="form-input" id="inp-person" placeholder="姓名或說明（選填）">
     </div>
@@ -1167,10 +1172,11 @@ async function reloadAll(btn) {
 }
 
 // 一筆異動：先寫「異動紀錄」，再更新「品項清單」的目前庫存。兩個都成功才更新畫面。
-async function commitTransaction(item, delta, typeLabel, person, note) {
+// time 可以不傳，不傳就用「現在」；表單上加了日期時間欄位後，補登以前的紀錄就會傳實際發生的時間進來。
+async function commitTransaction(item, delta, typeLabel, person, note, time) {
   const prev = item.qty;
   const after = prev + delta;
-  const log = { id: uid('r'), time: fmtTime(new Date()), typeLabel: typeLabel, name: item.name,
+  const log = { id: uid('r'), time: time || fmtTime(new Date()), typeLabel: typeLabel, name: item.name,
                 delta: delta, qty: Math.abs(delta), person: person || '', note: note || '', prev: prev, after: after };
   await ppeApiUpsert(SHEET_LOGS, logToRow(log));
   const updated = Object.assign({}, item, { qty: after });
@@ -1488,12 +1494,24 @@ async function submitAdd(btn) {
 }
 
 // ── 進貨/領取 Modal ──
+// datetime-local 欄位要的格式是 "YYYY-MM-DDTHH:MM"（沒有秒），這裡用目前時間當預設值。
+function nowForDatetimeLocal() {
+  const d = new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+// 把表單填的日期時間轉成系統統一的顯示格式；沒填或格式看不懂就直接用現在時間。
+function datetimeLocalToFmt(v) {
+  if (!v) return fmtTime(new Date());
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? fmtTime(new Date()) : fmtTime(d);
+}
 function openModal(type, itemId) {
   modalType = type; preselect = itemId||null; setType(type);
   const sel = document.getElementById('sel-item');
   sel.innerHTML = inventory.map(i=>\`<option value="\${i.id}">\${i.name}（剩 \${i.qty}）</option>\`).join('');
   if (preselect) sel.value = preselect;
   document.getElementById('inp-qty').value=1;
+  document.getElementById('inp-time').value = nowForDatetimeLocal();
   document.getElementById('inp-person').value='';
   document.getElementById('inp-note').value='';
   document.getElementById('overlay').classList.add('open');
@@ -1524,8 +1542,9 @@ async function submitModal() {
   }
   const typeLabel = modalType==='in' ? '進貨' : '領取';
   const delta = modalType==='in' ? qty : -qty;
+  const time = datetimeLocalToFmt(document.getElementById('inp-time').value);
   try {
-    await withButton(btn, '儲存中...', () => commitTransaction(item, delta, typeLabel, person, note));
+    await withButton(btn, '儲存中...', () => commitTransaction(item, delta, typeLabel, person, note, time));
   } catch (err) {
     showToast('儲存失敗：' + (err && err.message ? err.message : err));
     return;
