@@ -1871,19 +1871,30 @@ async function commitImportedTransaction(item, delta, typeLabel, person, note, t
 async function submitLogImport(btn) {
   if (!pendingLogImports.length) { closeLogImportModal(); return; }
   const items = pendingLogImports;
+  const failed = [];
+  let okCount = 0;
   await withButton(btn, '寫入中...', async () => {
     for (const r of items) {
       const noteText = (r.note ? r.note + '　' : '') + '(Excel 匯入同步)';
       try {
         await commitImportedTransaction(r.item, r.delta, r.typeLabel, r.person, noteText, r.time);
+        okCount++;
       } catch (err) {
         console.error('匯入異動紀錄失敗：', r.item.name, err);
+        failed.push(r.time + ' ' + r.item.name + '（' + (err && err.message ? err.message : err) + '）');
       }
     }
   });
+  // 寫入之後不能只靠剛剛推進記憶體裡的資料畫面，要重新跟雲端要一次最新資料，
+  // 這樣畫面顯示的才會是「試算表裡真的存到什麼」，不是「程式以為存到什麼」。
+  await loadAll();
   renderAll();
   closeLogImportModal();
-  showToast('已匯入 ' + items.length + ' 筆異動紀錄');
+  if (failed.length) {
+    alert('⚠️ 有 ' + failed.length + ' 筆寫入失敗，請截圖以下內容回報：\\n\\n' + failed.slice(0,10).join('\\n') + (failed.length>10?'\\n…等':''));
+    return;
+  }
+  showToast('已匯入 ' + okCount + ' 筆異動紀錄');
 }
 
 // ── 啟動：先把三個雲端分頁的資料抓下來，再畫畫面 ──
