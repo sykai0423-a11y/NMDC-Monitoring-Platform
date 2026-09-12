@@ -85,6 +85,12 @@ body {
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .status-light { display: inline-flex; align-items: center; font-size: 13px; cursor: pointer; background: none; border: none; color: var(--text); padding: 0; }
 
+/* 首頁 台中端/通霄端 卡片：點已完成/待辦/未完成 展開清單 */
+.dash-expand-panel { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.dash-expand-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.dash-expand-close { background: none; border: none; color: var(--text-dim); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.dash-expand-close:hover { color: var(--text); }
+
 .btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 4px; padding: 8px 14px; font-size: 13px; cursor: pointer; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--text); }
 .btn.primary { background: var(--accent); color: #06201C; border-color: var(--accent); font-weight: 600; }
 .btn.ghost { background: transparent; }
@@ -3850,7 +3856,7 @@ renderLoc('taipei');
 </body>
 </html>`;
 
-let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), monitorSelected: null, monitorDownloadSelected: new Set(), pendingUpload: null, monitorSummaryYear: new Date().getFullYear(), dutyCursor: (()=>{const d=new Date(); d.setDate(1); return d;})() };
+let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), monitorSelected: null, monitorDownloadSelected: new Set(), pendingUpload: null, monitorSummaryYear: new Date().getFullYear(), dutyCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), dashboardExpanded: {} };
 
 /* ============================= nav ============================= */
 const NAV = [
@@ -3932,6 +3938,12 @@ function render() {
 }
 
 /* ============================= Dashboard ============================= */
+// 首頁 台中端/通霄端 卡片：點「已完成/待辦/未完成」展開對應清單（可同時展開多個），點右上角 × 收合
+function toggleDashExpand(key) {
+  state.dashboardExpanded[key] = !state.dashboardExpanded[key];
+  render();
+}
+
 function renderDashboard() {
   const patrol = DB.patrol;
   const tomorrow = DB.tomorrow;
@@ -3940,19 +3952,34 @@ function renderDashboard() {
   const reservations = DB.poeReservation;
   const today = todayStr();
 
+  const DASH_STATUS_LABEL = { done: '已完成', pending: '待辦', incomplete: '未完成' };
+  const DASH_STATUS_COLOR = { done: 'var(--green)', pending: 'var(--amber)', incomplete: 'var(--red)' };
   function siteCard(site) {
     const done = patrol.some(p => p.date === today && p.site === site);
     const plans = tomorrow.filter(t => t.site === site);
     const counts = { done:0, pending:0, incomplete:0 };
     plans.forEach(p => counts[p.status] = (counts[p.status]||0)+1);
+    const panels = ['done','pending','incomplete'].map(k => {
+      const expandKey = site + '__' + k;
+      if (!state.dashboardExpanded[expandKey]) return '';
+      const items = plans.filter(p => p.status === k);
+      const body = items.length
+        ? `<div class="reminder-list">${items.map(p => `<div class="reminder-item"><span>${esc(p.task||'（未填寫工作項目）')}</span><span class="text-dim">${esc(p.assignee||'')}</span></div>`).join('')}</div>`
+        : `<p class="text-dim" style="margin:0;">目前沒有項目</p>`;
+      return `<div class="dash-expand-panel">
+        <div class="dash-expand-head"><span style="color:${DASH_STATUS_COLOR[k]};">${DASH_STATUS_LABEL[k]}（${counts[k]||0}）</span><button class="dash-expand-close" onclick="toggleDashExpand('${expandKey}')" title="收合">×</button></div>
+        ${body}
+      </div>`;
+    }).join('');
     return `<div class="viewfinder card">
       <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
       <div class="card-head"><span>${site}</span><span class="pill ${done?'pill-green':'pill-red'}">${done?'今日已巡檢':'今日尚未巡檢'}</span></div>
       <div class="light-row">
-        <span><span class="dot" style="background:var(--green)"></span>${counts.done||0} 已完成</span>
-        <span><span class="dot" style="background:var(--amber)"></span>${counts.pending||0} 待辦</span>
-        <span><span class="dot" style="background:var(--red)"></span>${counts.incomplete||0} 未完成</span>
+        <button class="status-light" onclick="toggleDashExpand('${site}__done')"><span class="dot" style="background:var(--green)"></span>${counts.done||0} 已完成</button>
+        <button class="status-light" onclick="toggleDashExpand('${site}__pending')"><span class="dot" style="background:var(--amber)"></span>${counts.pending||0} 待辦</button>
+        <button class="status-light" onclick="toggleDashExpand('${site}__incomplete')"><span class="dot" style="background:var(--red)"></span>${counts.incomplete||0} 未完成</button>
       </div>
+      ${panels}
     </div>`;
   }
 
