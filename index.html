@@ -3938,6 +3938,17 @@ function render() {
 }
 
 /* ============================= Dashboard ============================= */
+// 「明日預計工作」排序用：工作項目文字常常自己打了日期（例如「8/31 …」「9/4(三) …」），
+// 有的話優先用它排序；沒有的話退回新增當下記錄的日期。首頁卡片展開清單、工作日誌頁面共用同一套排序邏輯。
+function tomorrowSortKey(it) {
+  const m = (it.task || '').match(/^(\d{1,2})\/(\d{1,2})/);
+  if (m) {
+    const year = (it.date || todayStr()).slice(0, 4);
+    return `${year}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  }
+  return it.date || '9999-99-99';
+}
+
 // 首頁 台中端/通霄端 卡片：點「已完成/待辦/未完成」展開對應清單（可同時展開多個），點右上角 × 收合
 function toggleDashExpand(key) {
   state.dashboardExpanded[key] = !state.dashboardExpanded[key];
@@ -3962,15 +3973,9 @@ function renderDashboard() {
     const panels = ['done','pending','incomplete'].map(k => {
       const expandKey = site + '__' + k;
       if (!state.dashboardExpanded[expandKey]) return '';
-      const items = plans.filter(p => p.status === k).slice().sort((a, b) => {
-        const da = a.date || '', db = b.date || '';
-        if (!da && !db) return 0;
-        if (!da) return 1;
-        if (!db) return -1;
-        return da.localeCompare(db);
-      });
+      const items = plans.filter(p => p.status === k).slice().sort((a, b) => tomorrowSortKey(a).localeCompare(tomorrowSortKey(b)));
       const body = items.length
-        ? `<div class="reminder-list">${items.map(p => `<div class="reminder-item"><span>${p.date?`<span class="text-dim mono" style="margin-right:8px;">${esc(p.date)}</span>`:''}${esc(p.task||'（未填寫工作項目）')}</span><span class="text-dim">${esc(p.assignee||'')}</span></div>`).join('')}</div>`
+        ? `<div class="reminder-list">${items.map(p => `<div class="reminder-item"><span>${esc(p.task||'（未填寫工作項目）')}</span><span class="text-dim">${esc(p.assignee||'')}</span></div>`).join('')}</div>`
         : `<p class="text-dim" style="margin:0;">目前沒有項目</p>`;
       return `<div class="dash-expand-panel">
         <div class="dash-expand-head"><span style="color:${DASH_STATUS_COLOR[k]};">${DASH_STATUS_LABEL[k]}（${counts[k]||0}）</span><button class="dash-expand-close" onclick="toggleDashExpand('${expandKey}')" title="收合">×</button></div>
@@ -4200,17 +4205,6 @@ function renderWorklog() {
   window.__filterDate = window.__filterDate || '';
 
   const STATUS_MAP = { done:['已完成','var(--green)'], pending:['待完成','var(--amber)'], incomplete:['未完成','var(--red)'] };
-
-  function tomorrowSortKey(it) {
-    // 工作項目文字常常自己打了日期（例如「8/31 …」「9/4(三) …」），
-    // 有的話優先用它排序；沒有的話退回新增當下記錄的日期。
-    const m = (it.task || '').match(/^(\d{1,2})\/(\d{1,2})/);
-    if (m) {
-      const year = (it.date || todayStr()).slice(0, 4);
-      return `${year}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
-    }
-    return it.date || '9999-99-99';
-  }
 
   function tomorrowRows() {
     const items = tomorrow.slice().sort((a, b) => {
