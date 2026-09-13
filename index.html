@@ -3962,9 +3962,15 @@ function renderDashboard() {
     const panels = ['done','pending','incomplete'].map(k => {
       const expandKey = site + '__' + k;
       if (!state.dashboardExpanded[expandKey]) return '';
-      const items = plans.filter(p => p.status === k);
+      const items = plans.filter(p => p.status === k).slice().sort((a, b) => {
+        const da = a.date || '', db = b.date || '';
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return da.localeCompare(db);
+      });
       const body = items.length
-        ? `<div class="reminder-list">${items.map(p => `<div class="reminder-item"><span>${esc(p.task||'（未填寫工作項目）')}</span><span class="text-dim">${esc(p.assignee||'')}</span></div>`).join('')}</div>`
+        ? `<div class="reminder-list">${items.map(p => `<div class="reminder-item"><span>${p.date?`<span class="text-dim mono" style="margin-right:8px;">${esc(p.date)}</span>`:''}${esc(p.task||'（未填寫工作項目）')}</span><span class="text-dim">${esc(p.assignee||'')}</span></div>`).join('')}</div>`
         : `<p class="text-dim" style="margin:0;">目前沒有項目</p>`;
       return `<div class="dash-expand-panel">
         <div class="dash-expand-head"><span style="color:${DASH_STATUS_COLOR[k]};">${DASH_STATUS_LABEL[k]}（${counts[k]||0}）</span><button class="dash-expand-close" onclick="toggleDashExpand('${expandKey}')" title="收合">×</button></div>
