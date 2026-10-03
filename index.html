@@ -143,6 +143,9 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 @media (max-width: 700px) { .row-form { flex-wrap: wrap; } }
 /* 工作日誌頁「明日預計工作」的標題+輸入列：往下捲動清單時固定在畫面上方，方便邊看下方項目邊輸入新項目 */
 .tomorrow-sticky-head { position: sticky; top: 0; z-index: 5; background: var(--bg-panel); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+/* 清單本身改成固定高度、內部自己捲動（跟監看紀錄表左側清單同樣做法），
+   這樣清單再長，上面的輸入列也一定會留在畫面上，不需要捲動整個頁面 */
+.tomorrow-plan-list { max-height: 48vh; overflow-y: auto; padding-right: 4px; }
 .inline-add { display: flex; flex-direction: column; gap: 8px; background: var(--bg-panel-2); padding: 12px; border-radius: 4px; margin-top: 8px; }
 
 .cal-head { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 14px; }
@@ -4253,7 +4256,7 @@ function renderWorklog() {
         <button class="btn primary" style="flex-shrink:0;" onclick="addTomorrow(document.getElementById('tw-site').value)">＋新增</button>
       </div>
     </div>
-    <div class="plan-list" style="margin-top:10px;">${tomorrowRows()}</div>
+    <div class="plan-list tomorrow-plan-list" style="margin-top:10px;">${tomorrowRows()}</div>
   </div>`;
 
   const filtered = patrol.filter(p => (window.__filterSite==='全部'||p.site===window.__filterSite) && (!window.__filterDate||p.date===window.__filterDate));
