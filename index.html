@@ -192,7 +192,7 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .mini-bar-fill { height: 100%; border-radius: 4px; }
 .mini-bar-val { width: 48px; text-align: right; flex-shrink: 0; font-family: monospace; font-size: 11px; color: var(--text-dim); }
 .monitor-summary-title { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 28px 0 12px; }
-.monitor-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.monitor-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .monitor-summary-card { border: 1px solid var(--line); border-radius: 4px; padding: 12px; background: var(--bg-panel); display: flex; flex-direction: column; gap: 8px; }
 .monitor-summary-card.uploaded { border-color: rgba(51,209,122,.3); }
 .monitor-summary-card.missing { border-color: rgba(255,90,95,.25); }
@@ -201,9 +201,10 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .ms-card-filename { min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-card-actions { display: flex; gap: 6px; margin-top: 2px; }
 .ms-card-actions .btn { padding: 6px 8px; font-size: 12px; justify-content: center; }
-.ms-card-files { display: flex; flex-direction: column; gap: 4px; }
-.ms-file-row { display: flex; align-items: center; gap: 4px; font-size: 12px; background: var(--bg-panel-2); border-radius: 4px; padding: 4px 6px; }
-.ms-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ms-card-files { display: flex; flex-direction: column; gap: 6px; }
+.ms-file-row { display: flex; align-items: flex-start; gap: 4px; font-size: 12px; background: var(--bg-panel-2); border-radius: 4px; padding: 6px 6px 6px 8px; }
+.ms-file-name { flex: 1; overflow-wrap: anywhere; white-space: normal; line-height: 1.4; min-width: 0; padding-top: 2px; }
+.ms-file-row .icon-btn { flex-shrink: 0; }
 .btn:disabled { opacity: .35; cursor: not-allowed; }
 .link { color: var(--accent); text-decoration: underline; font-size: 13px; cursor: pointer; }
 .cat-block { margin-top: 8px; }
