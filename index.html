@@ -201,6 +201,9 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .ms-card-filename { min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-card-actions { display: flex; gap: 6px; margin-top: 2px; }
 .ms-card-actions .btn { padding: 6px 8px; font-size: 12px; justify-content: center; }
+.ms-card-files { display: flex; flex-direction: column; gap: 4px; }
+.ms-file-row { display: flex; align-items: center; gap: 4px; font-size: 12px; background: var(--bg-panel-2); border-radius: 4px; padding: 4px 6px; }
+.ms-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .btn:disabled { opacity: .35; cursor: not-allowed; }
 .link { color: var(--accent); text-decoration: underline; font-size: 13px; cursor: pointer; }
 .cat-block { margin-top: 8px; }
@@ -392,15 +395,29 @@ async function apiSaveMonitor(date, filename, fileUrl, overwriteCount) {
   return apiUpsert('監看紀錄表', { '日期': date, '檔名': filename, '雲端硬碟檔案連結': fileUrl, '上傳人': getCurrentUser(), '上傳時間': new Date().toISOString(), '覆蓋次數': overwriteCount });
 }
 
-// 監看紀錄表月彙總：以月份（YYYY-MM）為主鍵，獨立處理，需在試算表中新增分頁「監看紀錄表月彙總」
+// 監看紀錄表月彙總：每個月可以有「多筆檔案」，不再是一個月只能一筆。
+// 主鍵仍然是「月份」這個欄位（沿用現有 Apps Script 設定，不需要再去後端改 ID_COLUMNS），
+// 但實際寫入的值變成「YYYY-MM__隨機碼」這種格式，確保每一筆上傳都有自己獨立的主鍵、
+// 彼此不會互相覆蓋；讀取時再把前面的 YYYY-MM 取出來，用來判斷這筆檔案屬於哪個月份。
+// 舊資料（主鍵就是單純的 "YYYY-MM"，沒有 "__隨機碼"）一樣可以正常被讀到、歸到對應月份。
 async function apiListMonitorMonthly() {
   const rows = await apiList('監看紀錄表月彙總');
   const obj = {};
-  rows.forEach(r => { if (r['月份']) obj[r['月份']] = { filename: r['檔名'], fileUrl: r['雲端硬碟檔案連結'], uploader: r['上傳人'], uploadTime: r['上傳時間'], overwriteCount: r['覆蓋次數']||0 }; });
+  rows.forEach(r => {
+    const key = r['月份'];
+    if (!key) return;
+    const month = String(key).split('__')[0];
+    if (!obj[month]) obj[month] = [];
+    obj[month].push({ key: String(key), filename: r['檔名'], fileUrl: r['雲端硬碟檔案連結'], uploader: r['上傳人'], uploadTime: r['上傳時間'] });
+  });
+  // 同一個月內，新上傳的檔案排在前面
+  Object.values(obj).forEach(arr => arr.sort((a, b) => String(b.uploadTime||'').localeCompare(String(a.uploadTime||''))));
   return obj;
 }
-async function apiSaveMonitorMonthly(month, filename, fileUrl, overwriteCount) {
-  return apiUpsert('監看紀錄表月彙總', { '月份': month, '檔名': filename, '雲端硬碟檔案連結': fileUrl, '上傳人': getCurrentUser(), '上傳時間': new Date().toISOString(), '覆蓋次數': overwriteCount });
+async function apiSaveMonitorMonthly(month, filename, fileUrl) {
+  const key = month + '__' + uid();
+  await apiUpsert('監看紀錄表月彙總', { '月份': key, '檔名': filename, '雲端硬碟檔案連結': fileUrl, '上傳人': getCurrentUser(), '上傳時間': new Date().toISOString() });
+  return key;
 }
 
 // 全域資料快取：畫面渲染時直接讀這裡（同步），寫入/刪除成功後才重新從雲端拉取該類型資料
@@ -4547,29 +4564,33 @@ function downloadSelectedMonitorFiles() {
     }, i * 400);
   });
 }
-/* ============================= 監看紀錄表月彙總（獨立頁面，以月份為單位） ============================= */
+/* ============================= 監看紀錄表月彙總（獨立頁面，每月可上傳多份檔案） ============================= */
 function renderMonitorSummary() {
   const files = DB.monitorMonthly;
   const year = state.monitorSummaryYear;
   const cards = [];
   for (let m = 1; m <= 12; m++) {
     const key = `${year}-${String(m).padStart(2,'0')}`;
-    const rec = files[key];
-    const has = !!rec;
+    const list = files[key] || [];
+    const has = list.length > 0;
     const isCurrent = key === todayStr().slice(0,7);
+    const fileRows = list.map(f => `<div class="ms-file-row">
+        <span class="ms-file-name" title="${esc(f.filename)}">${esc(f.filename)}</span>
+        <button class="icon-btn" title="下載" onclick="downloadMonitorMonthlyFile('${f.key}')">⬇</button>
+        <button class="icon-btn danger" title="清除這筆上傳紀錄" onclick="clearMonitorMonthly('${f.key}','${esc(f.filename)}')">🗑</button>
+      </div>`).join('');
     cards.push(`<div class="monitor-summary-card ${has?'uploaded':'missing'}">
-      <div class="ms-card-top"><span class="mono">${year} / ${String(m).padStart(2,'0')}</span>${isCurrent?'<span class="text-dim" style="font-size:11px;">・本月</span>':''}${has?`<button class="icon-btn danger" style="margin-left:auto;" title="清除上傳紀錄" onclick="clearMonitorMonthly('${key}')">🗑</button>`:''}</div>
-      <div class="ms-card-status"><span class="dot" style="background:${has?'var(--green)':'var(--red)'};box-shadow:0 0 8px ${has?'var(--green)':'var(--red)'}"></span>${has?'已上傳':'未上傳'}</div>
-      <div class="ms-card-filename text-dim" title="${has?esc(rec.filename):''}">${has?esc(rec.filename):'—'}</div>
+      <div class="ms-card-top"><span class="mono">${year} / ${String(m).padStart(2,'0')}</span>${isCurrent?'<span class="text-dim" style="font-size:11px;">・本月</span>':''}</div>
+      <div class="ms-card-status"><span class="dot" style="background:${has?'var(--green)':'var(--red)'};box-shadow:0 0 8px ${has?'var(--green)':'var(--red)'}"></span>${has?`已上傳 ${list.length} 份`:'未上傳'}</div>
+      <div class="ms-card-files">${fileRows || '<span class="text-dim" style="font-size:12px;">—</span>'}</div>
       <div class="ms-card-actions">
-        <button class="btn ghost" onclick="triggerMonitorMonthlyUpload('${key}')">⬆ 上傳</button>
-        <button class="btn primary" ${has?'':'disabled'} onclick="downloadMonitorMonthlyFile('${key}')">⬇ 下載</button>
+        <button class="btn ghost full" onclick="triggerMonitorMonthlyUpload('${key}')">⬆ 新增上傳</button>
       </div>
     </div>`);
   }
   return `
   <h1 class="page-title">監看紀錄表月彙總</h1>
-  <p class="text-dim" style="margin-bottom:16px;">每月一份彙總檔案，依月份分別上傳／下載；紅燈＝未上傳、綠燈＝已上傳，上傳後同事即可直接下載。</p>
+  <p class="text-dim" style="margin-bottom:16px;">每月可上傳多份檔案（不限筆數），依月份分別上傳／下載；紅燈＝尚未上傳、綠燈＝已有檔案。</p>
   <div class="cal-head" style="justify-content:flex-start;gap:16px;margin-bottom:14px;">
     <button class="icon-btn" onclick="shiftSummaryYear(-1)">◀ 上一年</button>
     <span class="mono">${year}</span>
@@ -4583,53 +4604,40 @@ function triggerMonitorMonthlyUpload(month) {
   window.__monitorMonthlyUploadKey = month;
   document.getElementById('monitorMonthlyFileInput').click();
 }
+// 每月可以有多份檔案，所以上傳一律是「新增」，不會覆蓋同月份已經存在的檔案。
 async function handleMonitorMonthlyFile(e) {
   const file = e.target.files[0];
   const month = window.__monitorMonthlyUploadKey;
-  if (!file || !month) return;
-  const existing = DB.monitorMonthly[month];
-  if (existing) {
-    state.pendingUpload = { month, file };
-    confirmDialog(`${month} 已存在檔案（${esc(existing.filename)}），是否要覆蓋？`, 'doMonitorMonthlyUpload()');
-  } else {
-    await doMonitorMonthlyUploadWith(month, file, 0);
-  }
   e.target.value = '';
-}
-async function doMonitorMonthlyUpload() {
-  if (!state.pendingUpload) return;
-  const { month, file } = state.pendingUpload;
-  const existing = DB.monitorMonthly[month];
-  const count = (existing && existing.overwriteCount ? Number(existing.overwriteCount) : 0) + 1;
-  await doMonitorMonthlyUploadWith(month, file, count);
-  state.pendingUpload = null;
-  closeModal();
-}
-async function doMonitorMonthlyUploadWith(month, file, overwriteCount) {
+  if (!file || !month) return;
   try {
-    const existing = DB.monitorMonthly[month];
-    const url = await apiUploadFile(file, '監看紀錄表月彙總檔案', existing ? existing.fileUrl : '');
-    await apiSaveMonitorMonthly(month, file.name, url, overwriteCount);
+    const url = await apiUploadFile(file, '監看紀錄表月彙總檔案', '');
+    await apiSaveMonitorMonthly(month, file.name, url);
     await reloadOne('monitorMonthly');
   } catch (err) {
     alert('❌ 上傳過程發生錯誤：\n' + err);
   }
   render();
 }
-function downloadMonitorMonthlyFile(month) {
-  const rec = DB.monitorMonthly[month];
+function findMonitorMonthlyByKey(key) {
+  for (const month in DB.monitorMonthly) {
+    const found = (DB.monitorMonthly[month] || []).find(f => f.key === key);
+    if (found) return found;
+  }
+  return null;
+}
+function downloadMonitorMonthlyFile(key) {
+  const rec = findMonitorMonthlyByKey(key);
   if (!rec || !rec.fileUrl) return;
   window.open(toDriveDownloadUrl(rec.fileUrl), '_blank');
 }
-// 清除某月份的上傳紀錄（只刪除試算表裡的那一列，雲端硬碟裡的實體檔案不會被自動刪除）
-function clearMonitorMonthly(month) {
-  const rec = DB.monitorMonthly[month];
-  if (!rec) return;
-  confirmDialog(`確定要清除 ${month} 的上傳紀錄嗎？（僅清除平台上的紀錄，雲端硬碟裡的檔案不會自動刪除，如需要請自行到雲端硬碟手動刪除）`, `doClearMonitorMonthly('${month}')`);
+// 清除某一筆上傳紀錄（只刪除試算表裡的那一列，雲端硬碟裡的實體檔案不會被自動刪除）
+function clearMonitorMonthly(key, filename) {
+  confirmDialog(`確定要清除「${esc(filename)}」這筆上傳紀錄嗎？（僅清除平台上的紀錄，雲端硬碟裡的檔案不會自動刪除，如需要請自行到雲端硬碟手動刪除）`, `doClearMonitorMonthly('${key}')`);
 }
-async function doClearMonitorMonthly(month) {
+async function doClearMonitorMonthly(key) {
   try {
-    await apiDelete('監看紀錄表月彙總', month);
+    await apiDelete('監看紀錄表月彙總', key);
     await reloadOne('monitorMonthly');
   } catch (err) {
     alert('❌ 清除失敗：\n' + err);
