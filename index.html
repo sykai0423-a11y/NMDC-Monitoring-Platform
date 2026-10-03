@@ -141,6 +141,8 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .row-form { display: flex; gap: 8px; align-items: center; background: var(--bg-panel-2); padding: 10px; border-radius: 4px; }
 .row-form .input { width: auto; flex: 1; }
 @media (max-width: 700px) { .row-form { flex-wrap: wrap; } }
+/* 工作日誌頁「明日預計工作」的標題+輸入列：往下捲動清單時固定在畫面上方，方便邊看下方項目邊輸入新項目 */
+.tomorrow-sticky-head { position: sticky; top: 0; z-index: 5; background: var(--bg-panel); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .inline-add { display: flex; flex-direction: column; gap: 8px; background: var(--bg-panel-2); padding: 12px; border-radius: 4px; margin-top: 8px; }
 
 .cal-head { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 14px; }
@@ -4242,12 +4244,14 @@ function renderWorklog() {
   }
 
   const tomorrowWidget = `<div class="viewfinder card compact-card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
-    <div class="card-head"><span>明日預計工作</span></div>
-    <div class="row-form">
-      <select class="input" id="tw-site" style="width:110px;flex-shrink:0;"><option>台中端</option><option>通霄端</option></select>
-      <input class="input" id="tw-task" placeholder="工作項目">
-      <input class="input" id="tw-assignee" placeholder="負責人員（選填）" style="width:140px;flex-shrink:0;">
-      <button class="btn primary" style="flex-shrink:0;" onclick="addTomorrow(document.getElementById('tw-site').value)">＋新增</button>
+    <div class="tomorrow-sticky-head">
+      <div class="card-head"><span>明日預計工作</span></div>
+      <div class="row-form">
+        <select class="input" id="tw-site" style="width:110px;flex-shrink:0;"><option>台中端</option><option>通霄端</option></select>
+        <input class="input" id="tw-task" placeholder="工作項目">
+        <input class="input" id="tw-assignee" placeholder="負責人員（選填）" style="width:140px;flex-shrink:0;">
+        <button class="btn primary" style="flex-shrink:0;" onclick="addTomorrow(document.getElementById('tw-site').value)">＋新增</button>
+      </div>
     </div>
     <div class="plan-list" style="margin-top:10px;">${tomorrowRows()}</div>
   </div>`;
