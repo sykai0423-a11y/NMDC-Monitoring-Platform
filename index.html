@@ -143,9 +143,23 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 @media (max-width: 700px) { .row-form { flex-wrap: wrap; } }
 /* 工作日誌頁「明日預計工作」的標題+輸入列：往下捲動清單時固定在畫面上方，方便邊看下方項目邊輸入新項目 */
 .tomorrow-sticky-head { position: sticky; top: 0; z-index: 5; background: var(--bg-panel); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-/* 清單本身改成固定高度、內部自己捲動（跟監看紀錄表左側清單同樣做法），
-   這樣清單再長，上面的輸入列也一定會留在畫面上，不需要捲動整個頁面 */
-.tomorrow-plan-list { max-height: 48vh; overflow-y: auto; padding-right: 4px; }
+/* 明日預計工作：台中端／通霄端 左右兩欄表格，日期、工作內容、完成狀態（打勾/打叉）各自一欄，
+   仿照使用者原本 Excel 的呈現方式；每欄各自固定高度、內部捲動，上方輸入列不會被推走 */
+.tmrw-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .tmrw-wrap { grid-template-columns: 1fr; } }
+.tmrw-col { max-height: 48vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; }
+.tmrw-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.tmrw-table th.tmrw-table-head { position: sticky; top: 0; z-index: 2; background: #FFE066; color: #4A3B00; font-weight: 700; text-align: center; padding: 8px; font-size: 13px; border-bottom: 1px solid var(--line); }
+.tmrw-table td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 6px 8px; vertical-align: middle; }
+.tmrw-table tr:last-child td { border-bottom: none; }
+.tmrw-date { width: 62px; white-space: nowrap; font-family: monospace; font-size: 11.5px; color: var(--text-dim); }
+.tmrw-task { word-break: break-word; }
+.tmrw-mark { width: 30px; text-align: center; cursor: pointer; font-weight: 700; font-size: 14px; user-select: none; }
+.tmrw-mark-done { color: var(--green); }
+.tmrw-mark-bad { color: var(--red); }
+.tmrw-mark-pending { color: var(--text-dim); }
+.tmrw-del { width: 26px; text-align: center; border-right: none; padding: 6px 4px; }
+.tmrw-del .icon-btn { padding: 2px 4px; font-size: 11px; }
 .inline-add { display: flex; flex-direction: column; gap: 8px; background: var(--bg-panel-2); padding: 12px; border-radius: 4px; margin-top: 8px; }
 
 .cal-head { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 14px; }
@@ -4228,22 +4242,54 @@ function renderWorklog() {
   window.__filterDate = window.__filterDate || '';
 
   const STATUS_MAP = { done:['已完成','var(--green)'], pending:['待完成','var(--amber)'], incomplete:['未完成','var(--red)'] };
+  const WEEKDAY_CN = ['日','一','二','三','四','五','六'];
 
-  function tomorrowRows() {
-    const items = tomorrow.slice().sort((a, b) => {
-      const bySite = (a.site || '').localeCompare(b.site || '');
-      if (bySite !== 0) return bySite;
-      return tomorrowSortKey(a).localeCompare(tomorrowSortKey(b));
-    });
-    return items.map(it => {
-      const [label, color] = STATUS_MAP[it.status] || STATUS_MAP.pending;
-      return `<div class="plan-row compact">
-        <span class="pill" style="flex-shrink:0;">${it.site}</span>
-        <button class="status-light" onclick="cycleTomorrow('${it.id}')"><span class="dot" style="background:${color};box-shadow:0 0 8px ${color}"></span>${label}</button>
-        <div class="plan-text">${esc(it.task)}${it.assignee?` <span class="text-dim mono" style="font-size:12px;">（${esc(it.assignee)}）</span>`:''}</div>
-        <button class="icon-btn danger" onclick="delTomorrow('${it.id}')">✕</button>
-      </div>`;
-    }).join('') || `<p class="text-dim" style="padding:8px 0;">尚無預計項目</p>`;
+  // 把工作項目文字拆成「日期」跟「內容」兩部分：大家習慣把日期打在最前面（例如「9/30(三) 通霄-...」），
+  // 這裡抓出來單獨顯示在日期欄，內容欄就不會重複出現同一個日期。抓不到日期格式的話，
+  // 就用這筆記錄本身的日期（新增當下的日期）＋自動算出的星期幾來顯示。
+  function splitTomorrowDate(it) {
+    const task = it.task || '';
+    const m = task.match(/^(\d{1,2})\/(\d{1,2})(?:\s*[\(（]([^\)）]{1,3})[\)）])?\s*[-－:：、]?\s*/);
+    let mm, dd, rest;
+    if (m) {
+      mm = Number(m[1]); dd = Number(m[2]); rest = task.slice(m[0].length).trim();
+    } else {
+      const parts = (it.date || todayStr()).split('-');
+      mm = Number(parts[1]||0); dd = Number(parts[2]||0); rest = task;
+    }
+    const year = (it.date || todayStr()).slice(0,4);
+    const full = `${year}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    const d = new Date(full + 'T00:00:00');
+    const wd = isNaN(d.getTime()) ? '' : WEEKDAY_CN[d.getDay()];
+    const label = (mm && dd) ? `${mm}/${dd}${wd?`(${wd})`:''}` : '—';
+    return { label, text: rest || task };
+  }
+
+  // 狀態點擊一次照原本邏輯在「待完成→已完成→未完成」之間循環，只是改用打勾/打叉的樣式顯示
+  function tomorrowMark(status) {
+    if (status === 'done') return { sym: '✓', cls: 'tmrw-mark-done', title: STATUS_MAP.done[0] + '（點擊切換）' };
+    if (status === 'incomplete') return { sym: '✕', cls: 'tmrw-mark-bad', title: STATUS_MAP.incomplete[0] + '（點擊切換）' };
+    return { sym: '－', cls: 'tmrw-mark-pending', title: STATUS_MAP.pending[0] + '（點擊切換）' };
+  }
+
+  function tomorrowSiteTable(site) {
+    const items = tomorrow.filter(it => it.site === site).slice().sort((a, b) => tomorrowSortKey(a).localeCompare(tomorrowSortKey(b)));
+    const rows = items.map(it => {
+      const { label, text } = splitTomorrowDate(it);
+      const mark = tomorrowMark(it.status);
+      return `<tr>
+        <td class="tmrw-date">${esc(label)}</td>
+        <td class="tmrw-task">${esc(text)}${it.assignee?` <span class="text-dim mono" style="font-size:11px;">（${esc(it.assignee)}）</span>`:''}</td>
+        <td class="tmrw-mark ${mark.cls}" onclick="cycleTomorrow('${it.id}')" title="${mark.title}">${mark.sym}</td>
+        <td class="tmrw-del"><button class="icon-btn danger" onclick="delTomorrow('${it.id}')" title="刪除">✕</button></td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="4" class="text-dim" style="text-align:center;padding:12px;">尚無項目</td></tr>`;
+    return `<div class="tmrw-col">
+      <table class="tmrw-table">
+        <thead><tr><th colspan="4" class="tmrw-table-head">${site}</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
   }
 
   const tomorrowWidget = `<div class="viewfinder card compact-card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
@@ -4251,12 +4297,12 @@ function renderWorklog() {
       <div class="card-head"><span>明日預計工作</span></div>
       <div class="row-form">
         <select class="input" id="tw-site" style="width:110px;flex-shrink:0;"><option>台中端</option><option>通霄端</option></select>
-        <input class="input" id="tw-task" placeholder="工作項目">
+        <input class="input" id="tw-task" placeholder="工作項目（可在最前面打上日期，例如 9/30 ...，會自動拆到左側日期欄）">
         <input class="input" id="tw-assignee" placeholder="負責人員（選填）" style="width:140px;flex-shrink:0;">
         <button class="btn primary" style="flex-shrink:0;" onclick="addTomorrow(document.getElementById('tw-site').value)">＋新增</button>
       </div>
     </div>
-    <div class="plan-list tomorrow-plan-list" style="margin-top:10px;">${tomorrowRows()}</div>
+    <div class="tmrw-wrap" style="margin-top:10px;">${tomorrowSiteTable('台中端')}${tomorrowSiteTable('通霄端')}</div>
   </div>`;
 
   const filtered = patrol.filter(p => (window.__filterSite==='全部'||p.site===window.__filterSite) && (!window.__filterDate||p.date===window.__filterDate));
