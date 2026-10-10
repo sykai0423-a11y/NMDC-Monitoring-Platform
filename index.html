@@ -155,8 +155,8 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .tmrw-table tr:last-child td { border-bottom: none; }
 .tmrw-date { width: 58px; white-space: nowrap; font-family: monospace; font-size: 11.5px; color: var(--text-dim); }
 .tmrw-task { word-break: break-word; width: auto; }
-.tmrw-status { width: 56px; text-align: center; padding: 6px 4px; }
-.tmrw-status-inner { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tmrw-status { width: 82px; text-align: center; padding: 6px 4px; }
+.tmrw-status-inner { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .tmrw-mark { cursor: pointer; font-weight: 700; font-size: 14px; user-select: none; line-height: 1; }
 .tmrw-mark-done { color: var(--green); }
 .tmrw-mark-bad { color: var(--red); }
@@ -4285,6 +4285,7 @@ function renderWorklog() {
         <td class="tmrw-task">${esc(text)}${it.assignee?` <span class="text-dim mono" style="font-size:11px;">（${esc(it.assignee)}）</span>`:''}</td>
         <td class="tmrw-status"><div class="tmrw-status-inner">
           <span class="tmrw-mark ${mark.cls}" onclick="cycleTomorrow('${it.id}')" title="${mark.title}">${mark.sym}</span>
+          <button class="icon-btn tmrw-del-btn" onclick="showTomorrowForm('${it.id}')" title="編輯">✎</button>
           <button class="icon-btn danger tmrw-del-btn" onclick="delTomorrow('${it.id}')" title="刪除">✕</button>
         </div></td>
       </tr>`;
@@ -4364,6 +4365,53 @@ async function delTomorrow(id) {
   try { await apiDelete(SHEET_MAP.tomorrow.sheet, id); await reloadOne('tomorrow'); }
   catch (err) { alert('刪除失敗：' + err); }
   render();
+}
+// 編輯「明日預計工作」既有項目：日期還是打在工作項目文字最前面（跟新增時一樣的規則），
+// 改完儲存後畫面會重新依日期排序。
+function showTomorrowForm(id) {
+  const item = DB.tomorrow.find(r => r.id === id);
+  if (!item) return;
+  openModal('編輯明日預計工作', `
+    <div class="form-grid">
+      <input type="hidden" id="twe-id" value="${esc(item.id)}">
+      <label class="field"><span class="field-label mono">地點</span><select class="input" id="twe-site">
+        <option ${item.site==='台中端'?'selected':''}>台中端</option>
+        <option ${item.site==='通霄端'?'selected':''}>通霄端</option>
+      </select></label>
+      <label class="field"><span class="field-label mono">工作項目（可在最前面打上日期，例如 9/30 ...）</span><textarea class="input" id="twe-task">${esc(item.task)}</textarea></label>
+      <label class="field"><span class="field-label mono">負責人員（選填）</span><input class="input" id="twe-assignee" value="${esc(item.assignee)}"></label>
+      <label class="field"><span class="field-label mono">狀態</span><select class="input" id="twe-status">
+        <option value="pending" ${item.status==='pending'?'selected':''}>待完成</option>
+        <option value="done" ${item.status==='done'?'selected':''}>已完成</option>
+        <option value="incomplete" ${item.status==='incomplete'?'selected':''}>未完成</option>
+      </select></label>
+      <div class="row-end"><button class="btn primary" id="twe-save-btn" onclick="saveTomorrowEdit(this)">儲存</button></div>
+    </div>`);
+}
+async function saveTomorrowEdit(btn) {
+  const id = document.getElementById('twe-id').value;
+  const item = DB.tomorrow.find(r => r.id === id);
+  if (!item) { closeModal(); return; }
+  const task = document.getElementById('twe-task').value.trim();
+  if (!task) { alert('請填寫工作項目'); return; }
+  const rec = {
+    ...item,
+    site: document.getElementById('twe-site').value,
+    task,
+    assignee: document.getElementById('twe-assignee').value.trim(),
+    status: document.getElementById('twe-status').value,
+  };
+  const original = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中...'; }
+  try {
+    await apiUpsert(SHEET_MAP.tomorrow.sheet, SHEET_MAP.tomorrow.toRow(rec));
+    await reloadOne('tomorrow');
+  } catch (err) {
+    alert('儲存失敗：' + err);
+    if (btn) { btn.disabled = false; btn.textContent = original; }
+    return;
+  }
+  closeModal(); render();
 }
 async function cyclePatrol(id) {
   const it = DB.patrol.find(r => r.id === id);
