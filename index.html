@@ -3499,70 +3499,39 @@ function exportExcel() {
   const wb = XLSX.utils.book_new();
   const date = new Date().toISOString().slice(0,10);
 
-  // ── Color palette ──────────────────────────────────────────────
-  const C = {
-    headerBg:    '1A1D27',  // dark surface
-    headerFg:    'E2E8F0',  // light text
-    deptBg:      '22263A',  // dept row bg
-    deptFg:      'E2E8F0',
-    jacketFg:    '60A5FA',  // blue
-    pantsFg:     'A78BFA',  // purple
-    winterFg:    '34D399',  // green
-    recFg:       '86EFAC',  // light green (received)
-    tcBg:        '0D1F3C',  // taichung tint
-    tpBg:        '2D0F0A',  // taipei tint
-    tcAccent:    '4F7CFF',
-    tpAccent:    'E85C4A',
-    recBg:       '0D2B1E',  // received cell bg
-    emptyFg:     '7D8AB0',  // muted
-    sumBg:       '1A2640',
-    sumFg:       '4F7CFF',
-    white:       'FFFFFF',
-    borderClr:   '2E3350',
+  // 與網頁畫面一致的顏色（對應 CSS 變數 --tc / --tp 及各分類顏色）
+  const LOC = {
+    '台中': { icon:'🏭', hdrBg:'4F7CFF', hdrFg:'FFFFFF', deptBg:'E8ECF8', deptFg:'1E3A8A', subBg:'F0F4FF', recBg:'E6F7EE' },
+    '台北': { icon:'🏢', hdrBg:'E85C4A', hdrFg:'FFFFFF', deptBg:'FBE3DE', deptFg:'7A1F12', subBg:'FDEFEC', recBg:'E6F7EE' },
   };
+  const WH = 'FFFFFF', BK = '222222', HDR_BG = '2D3A5A', SUB = 'F0F4FF';
 
-  // ── Font / border helpers ──────────────────────────────────────
-  function font(bold, sz, color, italic) {
-    return { bold:!!bold, sz:sz||10, color:{rgb: color||C.headerFg}, italic:!!italic };
+  function bdr(thin) {
+    const s = {style: thin ? 'thin' : 'medium', color:{rgb:'999999'}};
+    return {top:s,bottom:s,left:s,right:s};
   }
-  function fill(rgb) { return { patternType:'solid', fgColor:{rgb} }; }
-  function border(clr) {
-    const s = { style:'thin', color:{rgb: clr||C.borderClr} };
-    return { top:s, bottom:s, left:s, right:s };
+  function xc(v, bold, sz, fgClr, bgClr, ha, wrap) {
+    return { v: v||'', t:'s',
+      s:{ font:{bold:!!bold, sz:sz||10, color:{rgb:fgClr||BK}},
+          fill:{patternType:'solid', fgColor:{rgb:bgClr||WH}},
+          border: bdr(true),
+          alignment:{horizontal:ha||'center', vertical:'center', wrapText:!!wrap} }};
   }
-  function align(h, v, wrap) {
-    return { horizontal:h||'left', vertical:v||'center', wrapText:!!wrap };
+  function xn(v, bold, fgClr, bgClr) {
+    const n = Number(v)||0;
+    return { v:n, t:'n',
+      s:{ font:{bold:!!bold, sz:10, color:{rgb:fgClr||BK}},
+          fill:{patternType:'solid', fgColor:{rgb:bgClr||WH}},
+          border: bdr(true),
+          alignment:{horizontal:'center', vertical:'center'} }};
   }
-
-  // Merge helper: collect merges to add to ws['!merges']
   function mk(r1,c1,r2,c2){ return {s:{r:r1,c:c1},e:{r:r2,c:c2}}; }
-
-  // ── Cell builder ──────────────────────────────────────────────
-  function cell(v, bold, sz, fgClr, bgClr, ha, wrap, italic) {
-    const t = (v===null||v===undefined||v==='') ? '' : String(v);
-    const c = { v:t, t:'s',
-      s:{ font: font(bold,sz,fgClr,italic),
-          fill: bgClr ? fill(bgClr) : {patternType:'none'},
-          border: border(),
-          alignment: align(ha||'left','center',wrap) }};
-    return c;
-  }
-  function numCell(v, bold, fgClr, bgClr, ha) {
-    const n = Number(v);
-    return { v: isNaN(n)?0:n, t:'n',
-      s:{ font: font(bold,10,fgClr),
-          fill: bgClr ? fill(bgClr) : {patternType:'none'},
-          border: border(),
-          alignment: align(ha||'center','center') }};
-  }
-
-  // ── Write array-of-arrays + style into a worksheet ──────────────
   function buildSheet(rows, merges, colWidths) {
     const ws = {};
     let maxC = 0;
     rows.forEach((row, r) => {
       row.forEach((c, col) => {
-        if(c === null) return; // skip (covered by merge)
+        if(c === null || c === undefined) return;
         ws[XLSX.utils.encode_cell({r,c:col})] = c;
         if(col > maxC) maxC = col;
       });
@@ -3574,88 +3543,53 @@ function exportExcel() {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // SHEET 1 & 2: 台中 / 台北 — grouped by department (無 Vocab、有線框)
-  // 欄位: Badge(0) 姓名(1) 部門(2) 夾克尺寸(3) 夾克領用(4) 褲子尺寸(5) 褲子領用(6) 冬季尺寸(7) 冬季領用(8)
+  // SHEET 1 & 2: 台中 / 台北 — 按部門分組（標頭／小計／總計顏色對應網頁 --tc / --tp）
   // ══════════════════════════════════════════════════════════════
-  function makeLocSheet(locVal, accentClr) {
+  function makeLocSheet(locVal) {
+    const pal    = LOC[locVal];
     const locEmp = employees.filter(e => e.location === locVal);
     const depts  = [...new Set(locEmp.map(e=>e.department))].sort();
     const rows   = [];
     const merges = [];
-    const NC     = 9; // total columns 0-8
+    const NC     = 9;
 
-    // 統一白底深字線框樣式
-    const WH = 'FFFFFF';
-    const BK = '222222';
-    const HDR_BG = '2D3A5A';   // 深藍標頭
-    const DEPT_BG = 'E8ECF8';  // 淡藍部門列
-    const REC_BG  = 'E6F7EE';  // 淡綠已領
-    const SUB_BG  = 'F0F4FF';  // 小計列
-
-    function bdr(thin) {
-      const s = {style: thin ? 'thin' : 'medium', color:{rgb:'999999'}};
-      return {top:s,bottom:s,left:s,right:s};
-    }
-    function xc(v, bold, sz, fgClr, bgClr, ha, wrap) {
-      return { v: v||'', t:'s',
-        s:{ font:{bold:!!bold, sz:sz||10, color:{rgb:fgClr||BK}},
-            fill:{patternType:'solid', fgColor:{rgb:bgClr||WH}},
-            border: bdr(true),
-            alignment:{horizontal:ha||'center', vertical:'center', wrapText:!!wrap} }};
-    }
-    function xn(v, bold, fgClr, bgClr) {
-      const n = Number(v)||0;
-      return { v:n, t:'n',
-        s:{ font:{bold:!!bold, sz:10, color:{rgb:fgClr||BK}},
-            fill:{patternType:'solid', fgColor:{rgb:bgClr||WH}},
-            border: bdr(true),
-            alignment:{horizontal:'center', vertical:'center'} }};
-    }
-
-    // ── 標題 ──────────────────────────────────────────────
     rows.push([
-      xc(\`NMDC Coverall 領用管理 — \${locVal}　　匯出日期：\${date}　共 \${locEmp.length} 人\`,
-         true, 12, WH, HDR_BG, 'left'),
+      xc(\`\${pal.icon} NMDC Coverall 領用管理 — \${locVal}　　匯出日期：\${date}　共 \${locEmp.length} 人\`,
+         true, 12, pal.hdrFg, pal.hdrBg, 'left'),
       null,null,null,null,null,null,null,null
     ]);
     merges.push(mk(0,0,0,NC-1));
 
-    // ── 表頭 row 1 ────────────────────────────────────────
-    const H = rows.length;
     rows.push([
-      xc('Badge #',  true,10,WH,HDR_BG),
-      xc('姓名',      true,10,WH,HDR_BG,'left'),
-      xc('部門',      true,10,WH,HDR_BG),
-      xc('夾克尺寸',  true,10,'93C5FD',HDR_BG),
-      xc('夾克領用',  true,10,'6EE7B7',HDR_BG),
-      xc('褲子尺寸',  true,10,'C4B5FD',HDR_BG),
-      xc('褲子領用',  true,10,'6EE7B7',HDR_BG),
-      xc('冬季尺寸',  true,10,'FCD34D',HDR_BG),
-      xc('冬季領用',  true,10,'6EE7B7',HDR_BG),
+      xc('Badge #',  true,10,pal.hdrFg,pal.hdrBg),
+      xc('姓名',      true,10,pal.hdrFg,pal.hdrBg,'left'),
+      xc('部門',      true,10,pal.hdrFg,pal.hdrBg),
+      xc('夾克尺寸',  true,10,'93C5FD',pal.hdrBg),
+      xc('夾克領用',  true,10,'6EE7B7',pal.hdrBg),
+      xc('褲子尺寸',  true,10,'C4B5FD',pal.hdrBg),
+      xc('褲子領用',  true,10,'6EE7B7',pal.hdrBg),
+      xc('冬季尺寸',  true,10,'FCD34D',pal.hdrBg),
+      xc('冬季領用',  true,10,'6EE7B7',pal.hdrBg),
     ]);
 
-    // ── 部門群組 ──────────────────────────────────────────
     depts.forEach(dept => {
       const emps   = locEmp.filter(e=>e.department===dept);
       const recCnt = emps.filter(e=>e.jacket_received||e.pants_received||e.winter_received).length;
       const dRow   = rows.length;
 
-      // 部門標題列（合併全行）
       rows.push([
         xc(\`\${dept}　（\${emps.length} 人\${recCnt ? '，已領 '+recCnt+' 人' : ''}）\`,
-           true, 10, '1E3A8A', DEPT_BG, 'left'),
+           true, 10, pal.deptFg, pal.deptBg, 'left'),
         null,null,null,null,null,null,null,null
       ]);
       merges.push(mk(dRow, 0, dRow, NC-1));
 
-      // 員工列
       emps.forEach(e => {
         const hasRec = e.jacket_received||e.pants_received||e.winter_received;
-        const bg = hasRec ? REC_BG : WH;
-        const nameFg = '111111';
+        const bg = hasRec ? pal.recBg : WH;
         rows.push([
           xc(e.badge||'—',       false,9,'555555',bg),
-          xc(e.name,             false,10,nameFg,bg,'left'),
+          xc(e.name,             false,10,'111111',bg,'left'),
           xc(e.department,       false,9,'555555',bg),
           xc(e.jacket_uk||'—',   false,9,'1D4ED8',bg),
           xc(e.jacket_received||'—', e.jacket_received,9, e.jacket_received?'065F46':'AAAAAA', bg),
@@ -3666,104 +3600,87 @@ function exportExcel() {
         ]);
       });
 
-      // 小計列
       rows.push([
-        xc('小計', true,9,'1E3A8A',SUB_BG),
-        xn(emps.length, true,'1E3A8A',SUB_BG),
-        xc('', false,9,BK,SUB_BG),
-        xn(emps.filter(e=>e.jacket_uk).length,        true,'1D4ED8',SUB_BG),
-        xn(emps.filter(e=>e.jacket_received).length,   true,'065F46',SUB_BG),
-        xn(emps.filter(e=>e.pants_uk).length,          true,'5B21B6',SUB_BG),
-        xn(emps.filter(e=>e.pants_received).length,    true,'065F46',SUB_BG),
-        xn(emps.filter(e=>e.winter_jacket).length,     true,'92400E',SUB_BG),
-        xn(emps.filter(e=>e.winter_received).length,   true,'065F46',SUB_BG),
+        xc('小計', true,9,pal.deptFg,pal.subBg),
+        xn(emps.length, true,pal.deptFg,pal.subBg),
+        xc('', false,9,BK,pal.subBg),
+        xn(emps.filter(e=>e.jacket_uk).length,        true,'1D4ED8',pal.subBg),
+        xn(emps.filter(e=>e.jacket_received).length,   true,'065F46',pal.subBg),
+        xn(emps.filter(e=>e.pants_uk).length,          true,'5B21B6',pal.subBg),
+        xn(emps.filter(e=>e.pants_received).length,    true,'065F46',pal.subBg),
+        xn(emps.filter(e=>e.winter_jacket).length,     true,'92400E',pal.subBg),
+        xn(emps.filter(e=>e.winter_received).length,   true,'065F46',pal.subBg),
       ]);
     });
 
-    // ── 總計列 ────────────────────────────────────────────
     rows.push([
-      xc('總計', true,11,WH,HDR_BG),
-      xn(locEmp.length, true,WH,HDR_BG),
-      xc('', false,10,WH,HDR_BG),
-      xn(locEmp.filter(e=>e.jacket_uk).length,       true,'93C5FD',HDR_BG),
-      xn(locEmp.filter(e=>e.jacket_received).length,  true,'6EE7B7',HDR_BG),
-      xn(locEmp.filter(e=>e.pants_uk).length,         true,'C4B5FD',HDR_BG),
-      xn(locEmp.filter(e=>e.pants_received).length,   true,'6EE7B7',HDR_BG),
-      xn(locEmp.filter(e=>e.winter_jacket).length,    true,'FCD34D',HDR_BG),
-      xn(locEmp.filter(e=>e.winter_received).length,  true,'6EE7B7',HDR_BG),
+      xc('總計', true,11,pal.hdrFg,pal.hdrBg),
+      xn(locEmp.length, true,pal.hdrFg,pal.hdrBg),
+      xc('', false,10,pal.hdrFg,pal.hdrBg),
+      xn(locEmp.filter(e=>e.jacket_uk).length,       true,'93C5FD',pal.hdrBg),
+      xn(locEmp.filter(e=>e.jacket_received).length,  true,'6EE7B7',pal.hdrBg),
+      xn(locEmp.filter(e=>e.pants_uk).length,         true,'C4B5FD',pal.hdrBg),
+      xn(locEmp.filter(e=>e.pants_received).length,   true,'6EE7B7',pal.hdrBg),
+      xn(locEmp.filter(e=>e.winter_jacket).length,    true,'FCD34D',pal.hdrBg),
+      xn(locEmp.filter(e=>e.winter_received).length,  true,'6EE7B7',pal.hdrBg),
     ]);
 
     const colW = [
-      {wch:12},  // Badge
-      {wch:24},  // 姓名
-      {wch:18},  // 部門
-      {wch:14},  // 夾克尺寸
-      {wch:14},  // 夾克領用
-      {wch:14},  // 褲子尺寸
-      {wch:14},  // 褲子領用
-      {wch:14},  // 冬季尺寸
-      {wch:14},  // 冬季領用
+      {wch:12},{wch:24},{wch:18},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},
     ];
     return buildSheet(rows, merges, colW);
   }
 
   // ══════════════════════════════════════════════════════════════
-  // SHEET 3: 庫存
+  // SHEET 3: 現有庫存 — 依分類各自列出（對應網頁「📦 現有庫存」6 張卡片，文字與顏色一致）
   // ══════════════════════════════════════════════════════════════
   function makeInventorySheet() {
-    const WH='FFFFFF', HDR_BG='2D3A5A';
-    const cats = [
-      {key:'winter_blue', label:'冬套藍', fg:'4F7CFF'},
-      {key:'winter_red',  label:'冬套紅', fg:'E85C4A'},
-      {key:'jacket_red',  label:'夾克紅', fg:'F87171'},
-      {key:'jacket_blue', label:'夾克藍', fg:'60A5FA'},
-      {key:'pants_red',   label:'褲子紅', fg:'FB923C'},
-      {key:'pants_blue',  label:'褲子藍', fg:'A78BFA'},
-    ];
     const rows = [], merges = [];
-    const bdr = () => { const s={style:'thin',color:{rgb:'999999'}}; return {top:s,bottom:s,left:s,right:s}; };
-    const xc = (v,bold,sz,fg,bg,ha) => ({v:v||'',t:'s',s:{font:{bold:!!bold,sz:sz||10,color:{rgb:fg||'222222'}},fill:{patternType:'solid',fgColor:{rgb:bg||WH}},border:bdr(),alignment:{horizontal:ha||'center',vertical:'center'}}});
-    const xn = (v,bold,fg,bg) => ({v:Number(v)||0,t:'n',s:{font:{bold:!!bold,sz:10,color:{rgb:fg||'222222'}},fill:{patternType:'solid',fgColor:{rgb:bg||WH}},border:bdr(),alignment:{horizontal:'center',vertical:'center'}}});
 
-    // 標題
-    rows.push([xc(\`現有庫存　匯出：\${date}\`,true,12,WH,HDR_BG,'left'),null,null,null,null,null,null]);
-    merges.push(mk(0,0,0,6));
+    rows.push([xc(\`📦 現有庫存　匯出：\${date}\`,true,12,WH,HDR_BG,'left'),null,null]);
+    merges.push(mk(0,0,0,2));
 
-    // 表頭
-    rows.push([xc('尺寸',true,10,WH,HDR_BG), ...cats.map(c=>xc(c.label,true,9,c.fg,HDR_BG))]);
+    INV_CATS.forEach(cat => {
+      const total = Object.values(inventory).reduce((s,v)=>s+(v[cat.key]||0),0);
+      const hex = cat.color.replace('#','').toUpperCase();
+      const r0 = rows.length;
 
-    // 資料列
-    Object.entries(inventory).forEach(([sz,v]) => {
-      const total = cats.reduce((s,c)=>s+(v[c.key]||0),0);
-      const bg = total>0 ? 'F0F9FF' : WH;
       rows.push([
-        xc(sz, true, 10, '1E3A8A', bg),
-        ...cats.map(c => {
-          const n = v[c.key]||0;
-          return n>0 ? xn(n, true, c.fg, 'F0FDF4') : xc('—', false, 9, 'CCCCCC', bg);
-        })
+        xc(\`\${cat.label}　總量：\${total}\`, true, 11, hex, 'EEF1FA', 'left'),
+        null, null
       ]);
+      merges.push(mk(r0,0,r0,2));
+
+      rows.push([
+        xc('名稱',true,10,WH,HDR_BG,'left'),
+        xc('尺寸',true,10,WH,HDR_BG),
+        xc('數量',true,10,WH,HDR_BG),
+      ]);
+
+      const sizeRows = Object.entries(inventory).filter(([,v])=>(v[cat.key]||0)>0);
+      if (!sizeRows.length) {
+        const rr = rows.length;
+        rows.push([xc('無庫存', false, 9, '888888', WH, 'left'), null, null]);
+        merges.push(mk(rr, 0, rr, 2));
+      } else {
+        sizeRows.forEach(([sz,v]) => {
+          rows.push([
+            xc(cat.label, true, 10, hex, WH, 'left'),
+            xc(sz, false, 10, BK, WH),
+            xn(v[cat.key], true, hex, 'F7F9FC'),
+          ]);
+        });
+      }
     });
 
-    // 合計
-    rows.push([
-      xc('合計',true,10,WH,HDR_BG),
-      ...cats.map(c=>xn(Object.values(inventory).reduce((s,v)=>s+(v[c.key]||0),0),true,c.fg,HDR_BG))
-    ]);
-
-    const colW = [{wch:10},...cats.map(()=>({wch:12}))];
+    const colW = [{wch:20},{wch:12},{wch:10}];
     return buildSheet(rows, merges, colW);
   }
 
   // ══════════════════════════════════════════════════════════════
-  // SHEET 4: 統計總覽
+  // SHEET 4: 統計總覽 — 部門統計 + 尺寸分佈 + 現有庫存（對應網頁「📊 統計總覽」整頁內容）
   // ══════════════════════════════════════════════════════════════
   function makeStatsSheet() {
-    const WH='FFFFFF', HDR_BG='2D3A5A', SUB='F0F4FF';
-    const bdr = () => { const s={style:'thin',color:{rgb:'999999'}}; return {top:s,bottom:s,left:s,right:s}; };
-    const xc = (v,bold,sz,fg,bg,ha) => ({v:v||'',t:'s',s:{font:{bold:!!bold,sz:sz||10,color:{rgb:fg||'222222'}},fill:{patternType:'solid',fgColor:{rgb:bg||WH}},border:bdr(),alignment:{horizontal:ha||'center',vertical:'center'}}});
-    const xn = (v,bold,fg,bg) => ({v:Number(v)||0,t:'n',s:{font:{bold:!!bold,sz:10,color:{rgb:fg||'222222'}},fill:{patternType:'solid',fgColor:{rgb:bg||WH}},border:bdr(),alignment:{horizontal:'center',vertical:'center'}}});
-
     function deptStat(list) {
       const d={};
       list.forEach(e=>{
@@ -3781,8 +3698,7 @@ function exportExcel() {
     const tp = deptStat(tpEmp);
     const rows = [], merges = [];
 
-    // 標題
-    rows.push([xc(\`統計總覽　匯出：\${date}\`,true,12,WH,HDR_BG,'left'),null,null,null,null,null,null,null]);
+    rows.push([xc(\`📊 統計總覽　匯出：\${date}\`,true,12,WH,HDR_BG,'left'),null,null,null,null,null,null,null]);
     merges.push(mk(0,0,0,7));
 
     function locBlock(label, empList, statObj, acClr) {
@@ -3793,12 +3709,12 @@ function exportExcel() {
       rows.push([
         xc('部門',  true,9,WH,HDR_BG),
         xc('人數',  true,9,WH,HDR_BG),
-        xc('夾克尺寸',true,9,'93C5FD',HDR_BG),
+        xc('夾克登記',true,9,'93C5FD',HDR_BG),
         xc('夾克領用',true,9,'6EE7B7',HDR_BG),
-        xc('褲子尺寸',true,9,'C4B5FD',HDR_BG),
+        xc('褲子登記',true,9,'C4B5FD',HDR_BG),
         xc('褲子領用',true,9,'6EE7B7',HDR_BG),
-        xc('冬季尺寸',true,9,'FCD34D',HDR_BG),
-        xc('冬季領用',true,9,'6EE7B7',HDR_BG),
+        xc('冬套登記',true,9,'FCD34D',HDR_BG),
+        xc('冬套領用',true,9,'6EE7B7',HDR_BG),
       ]);
 
       Object.entries(statObj).forEach(([dep,v]) => {
@@ -3826,17 +3742,68 @@ function exportExcel() {
       ]);
     }
 
-    locBlock('台中 Taichung', tcEmp, tc, '1D4ED8');
-    locBlock('台北 Taipei',   tpEmp, tp, 'B91C1C');
+    locBlock('🏭 台中 Taichung', tcEmp, tc, LOC['台中'].hdrBg);
+    locBlock('🏢 台北 Taipei',   tpEmp, tp, LOC['台北'].hdrBg);
+
+    // ── 尺寸分佈（對應網頁「尺寸分佈」區塊）──────────────────────
+    function sizeDistRows(list, field) {
+      const s={};
+      list.forEach(e=>{ if(e[field]) s[e[field]]=(s[e[field]]||0)+1; });
+      return Object.entries(s).sort((a,b)=>b[1]-a[1]);
+    }
+    function sizeDistBlock(title, list, field) {
+      const data = sizeDistRows(list, field);
+      const r0 = rows.length;
+      rows.push([xc(title,true,10,WH,'3A4568','left'),null,null,null,null,null,null,null]);
+      merges.push(mk(r0,0,r0,7));
+      rows.push([xc('尺寸',true,9,WH,HDR_BG,'left'),xc('人數',true,9,WH,HDR_BG)]);
+      if (!data.length) {
+        rows.push([xc('無資料',false,9,'888888',WH,'left')]);
+      } else {
+        data.forEach(([sz,c])=>{
+          rows.push([xc(sz,false,9,'111111',WH,'left'),xn(c,false,'333333',SUB)]);
+        });
+      }
+    }
+
+    const distHeadRow = rows.length;
+    rows.push([xc('尺寸分佈',true,12,WH,HDR_BG,'left'),null,null,null,null,null,null,null]);
+    merges.push(mk(distHeadRow,0,distHeadRow,7));
+
+    sizeDistBlock('台中 冬季外套', tcEmp, 'winter_jacket');
+    sizeDistBlock('台中 夾克',     tcEmp, 'jacket_uk');
+    sizeDistBlock('台中 褲子',     tcEmp, 'pants_uk');
+    sizeDistBlock('台北 冬季外套', tpEmp, 'winter_jacket');
+
+    // ── 現有庫存（對應網頁「現有庫存」區塊，6 分類）───────────────
+    const invHeadRow = rows.length;
+    rows.push([xc('現有庫存',true,12,WH,HDR_BG,'left'),null,null,null,null,null,null,null]);
+    merges.push(mk(invHeadRow,0,invHeadRow,7));
+
+    INV_CATS.forEach(cat => {
+      const hex = cat.color.replace('#','').toUpperCase();
+      const r0 = rows.length;
+      rows.push([xc(cat.label,true,10,hex,'EEF1FA','left'),null,null,null,null,null,null,null]);
+      merges.push(mk(r0,0,r0,7));
+      rows.push([xc('尺寸',true,9,WH,HDR_BG,'left'),xc('數量',true,9,WH,HDR_BG)]);
+      const data = Object.entries(inventory).filter(([,v])=>(v[cat.key]||0)>0);
+      if (!data.length) {
+        rows.push([xc('無庫存',false,9,'888888',WH,'left')]);
+      } else {
+        data.forEach(([sz,v])=>{
+          rows.push([xc(sz,false,9,'111111',WH,'left'),xn(v[cat.key],true,hex,'F7F9FC')]);
+        });
+      }
+    });
 
     const colW = [{wch:22},{wch:8},{wch:11},{wch:11},{wch:11},{wch:11},{wch:11},{wch:11}];
     return buildSheet(rows, merges, colW);
   }
 
-  // ── Assemble workbook ─────────────────────────────────────────
-  XLSX.utils.book_append_sheet(wb, makeLocSheet('台中','1D4ED8'), '台中');
-  XLSX.utils.book_append_sheet(wb, makeLocSheet('台北','B91C1C'), '台北總公司');
-  XLSX.utils.book_append_sheet(wb, makeInventorySheet(), '現有衣服尺寸');
+  // ── Assemble workbook（分頁命名與順序對應網頁分頁：台中／台北／現有庫存／統計總覽）──
+  XLSX.utils.book_append_sheet(wb, makeLocSheet('台中'), '台中');
+  XLSX.utils.book_append_sheet(wb, makeLocSheet('台北'), '台北');
+  XLSX.utils.book_append_sheet(wb, makeInventorySheet(), '現有庫存');
   XLSX.utils.book_append_sheet(wb, makeStatsSheet(), '統計總覽');
 
   XLSX.writeFile(wb, \`NMDC_Coverall_\${date}.xlsx\`);
