@@ -148,18 +148,21 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .tmrw-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 900px) { .tmrw-wrap { grid-template-columns: 1fr; } }
 .tmrw-col { max-height: 48vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; }
-.tmrw-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.tmrw-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tmrw-table th.tmrw-table-head { position: sticky; top: 0; z-index: 2; background: #FFE066; color: #4A3B00; font-weight: 700; text-align: center; padding: 8px; font-size: 13px; border-bottom: 1px solid var(--line); }
 .tmrw-table td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 6px 8px; vertical-align: middle; }
+.tmrw-table td:last-child { border-right: none; }
 .tmrw-table tr:last-child td { border-bottom: none; }
-.tmrw-date { width: 62px; white-space: nowrap; font-family: monospace; font-size: 11.5px; color: var(--text-dim); }
-.tmrw-task { word-break: break-word; }
-.tmrw-mark { width: 30px; text-align: center; cursor: pointer; font-weight: 700; font-size: 14px; user-select: none; }
+.tmrw-date { width: 58px; white-space: nowrap; font-family: monospace; font-size: 11.5px; color: var(--text-dim); }
+.tmrw-task { word-break: break-word; width: auto; }
+.tmrw-status { width: 56px; text-align: center; padding: 6px 4px; }
+.tmrw-status-inner { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tmrw-mark { cursor: pointer; font-weight: 700; font-size: 14px; user-select: none; line-height: 1; }
 .tmrw-mark-done { color: var(--green); }
 .tmrw-mark-bad { color: var(--red); }
 .tmrw-mark-pending { color: var(--text-dim); }
-.tmrw-del { width: 26px; text-align: center; border-right: none; padding: 6px 4px; }
-.tmrw-del .icon-btn { padding: 2px 4px; font-size: 11px; }
+.tmrw-del-btn { opacity: .45; padding: 2px 4px; font-size: 11px; line-height: 1; }
+.tmrw-del-btn:hover { opacity: 1; }
 .inline-add { display: flex; flex-direction: column; gap: 8px; background: var(--bg-panel-2); padding: 12px; border-radius: 4px; margin-top: 8px; }
 
 .cal-head { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 14px; }
@@ -4280,13 +4283,15 @@ function renderWorklog() {
       return `<tr>
         <td class="tmrw-date">${esc(label)}</td>
         <td class="tmrw-task">${esc(text)}${it.assignee?` <span class="text-dim mono" style="font-size:11px;">（${esc(it.assignee)}）</span>`:''}</td>
-        <td class="tmrw-mark ${mark.cls}" onclick="cycleTomorrow('${it.id}')" title="${mark.title}">${mark.sym}</td>
-        <td class="tmrw-del"><button class="icon-btn danger" onclick="delTomorrow('${it.id}')" title="刪除">✕</button></td>
+        <td class="tmrw-status"><div class="tmrw-status-inner">
+          <span class="tmrw-mark ${mark.cls}" onclick="cycleTomorrow('${it.id}')" title="${mark.title}">${mark.sym}</span>
+          <button class="icon-btn danger tmrw-del-btn" onclick="delTomorrow('${it.id}')" title="刪除">✕</button>
+        </div></td>
       </tr>`;
-    }).join('') || `<tr><td colspan="4" class="text-dim" style="text-align:center;padding:12px;">尚無項目</td></tr>`;
+    }).join('') || `<tr><td colspan="3" class="text-dim" style="text-align:center;padding:12px;">尚無項目</td></tr>`;
     return `<div class="tmrw-col">
       <table class="tmrw-table">
-        <thead><tr><th colspan="4" class="tmrw-table-head">${site}</th></tr></thead>
+        <thead><tr><th colspan="3" class="tmrw-table-head">${site}</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
