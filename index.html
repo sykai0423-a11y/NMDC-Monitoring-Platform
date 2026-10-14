@@ -231,6 +231,12 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .link { color: var(--accent); text-decoration: underline; font-size: 13px; cursor: pointer; }
 .cat-block { margin-top: 8px; }
 .empty-hint { color: var(--text-dim); }
+.links-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.link-card { position: relative; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-panel); display: flex; flex-direction: column; }
+.link-card-name { font-weight: 600; font-size: 13px; text-align: center; padding: 10px 34px 10px 10px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.link-card-url-wrap { padding: 10px; text-align: center; }
+.link-card-url { color: var(--accent); text-decoration: underline; font-size: 12.5px; overflow-wrap: anywhere; }
+.link-card-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; }
 .ppe-frame { width: 100%; height: calc(100vh - 170px); border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 </style>
 </head>
@@ -402,6 +408,9 @@ const SHEET_MAP = {
   router: { sheet: '路由器更換表', idCol: '設備ID',
     toRow: r => ({ '設備ID': r.id||'', '站點': r.site, '設備類型': r.type, '設備編號': r.code, '目前版本': r.cur||'第一版', '更換後版本': r.next||'', '更換日期': r.date||'', '狀態': r.status||'未更換', '備註': r.note||'' }),
     fromRow: s => ({ id: s['設備ID'], site: s['站點'], type: s['設備類型'], code: s['設備編號'], cur: s['目前版本']||'第一版', next: s['更換後版本']||'', date: s['更換日期']||'', status: s['狀態']||'未更換', note: s['備註']||'' }) },
+  links: { sheet: '附屬網址', idCol: '項目ID',
+    toRow: r => ({ '項目ID': r.id||'', '名稱': r.name, '網址': r.url, '建立時間': r.createdAt||new Date().toISOString() }),
+    fromRow: s => ({ id: s['項目ID'], name: s['名稱']||'', url: s['網址']||'', createdAt: s['建立時間']||'' }) },
 };
 
 // 監看紀錄表：以日期為主鍵，獨立處理
@@ -444,19 +453,20 @@ async function apiSaveMonitorMonthly(month, filename, fileUrl) {
 }
 
 // 全域資料快取：畫面渲染時直接讀這裡（同步），寫入/刪除成功後才重新從雲端拉取該類型資料
-let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [], ppeItems: [] };
+let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [], ppeItems: [], links: [] };
 
 async function loadAllData() {
   const contentEl = document.getElementById('content');
   contentEl.innerHTML = '<div class="page"><p class="text-dim">連線 Google 雲端讀取資料中…</p></div>';
   try {
-    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, ppeItemRows] = await Promise.all([
+    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, ppeItemRows, linkRows] = await Promise.all([
       apiList('工作日誌'), apiList('明日預計工作'), apiList('POE抽查日誌'), apiList('POE其他需求檔案'),
       apiList('台中端設備清單'), apiList('通霄端設備清單'), apiListMonitor(), apiListMonitorMonthly(),
       apiList('POE預約抽查'), apiList('設備維護紀錄'), apiList('GPS機台資料表'),
       apiList('監看值班表').catch(() => []), // 若試算表尚未新增「監看值班表」分頁，先以空陣列降級，不中斷其他資料讀取
       apiList('路由器更換表').catch(() => []), // 同上，尚未新增「路由器更換表」分頁時先降級成空陣列
       apiList('防護具品項清單').catch(() => []), // 首頁「PPE 庫存提醒」直接讀雲端，不再依賴 PPE 頁面的 localStorage
+      apiList('附屬網址').catch(() => []), // 同上，尚未新增「附屬網址」分頁時先降級成空陣列
     ]);
     DB.patrol = patrolRows.map(SHEET_MAP.patrol.fromRow);
     DB.tomorrow = tomorrowRows.map(SHEET_MAP.tomorrow.fromRow);
@@ -472,6 +482,7 @@ async function loadAllData() {
     DB.duty = dutyRows.map(SHEET_MAP.duty.fromRow);
     DB.router = routerRows.map(SHEET_MAP.router.fromRow);
     DB.ppeItems = ppeItemRows.map(r => ({ name: String(r['品項名稱'] == null ? '' : r['品項名稱']), qty: Number(r['目前庫存']) || 0 }));
+    DB.links = linkRows.map(SHEET_MAP.links.fromRow).sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   } catch (err) {
     contentEl.innerHTML = `<div class="page"><p class="warn-text">雲端資料讀取失敗：${esc(String(err))}</p><button class="btn primary" onclick="loadAllData()">重試</button></div>`;
     return;
@@ -485,6 +496,11 @@ async function reloadOne(type) {
   if (type === 'ppeItems') {
     const rows = await apiList('防護具品項清單');
     DB.ppeItems = rows.map(r => ({ name: String(r['品項名稱'] == null ? '' : r['品項名稱']), qty: Number(r['目前庫存']) || 0 }));
+    return;
+  }
+  if (type === 'links') {
+    const rows = await apiList('附屬網址');
+    DB.links = rows.map(SHEET_MAP.links.fromRow).sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     return;
   }
   const map = SHEET_MAP[type];
@@ -528,1457 +544,6 @@ const DEFAULT_CATEGORIES = {
   '通霄端': ['大螢幕投影設備','剪刀門管制系統','貨櫃哨口三叉機'],
 };
 
-const PPE_HTML = `<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>個人防護具庫存管理 ─ Excel 即時同步</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #F5F4F0; --surface: #FFFFFF; --border: #E2E0D8;
-    --text-primary: #1A1A18; --text-secondary: #6B6A64; --text-muted: #9E9D96;
-    --ok: #1D9E75; --ok-bg: #E1F5EE;
-    --low: #BA7517; --low-bg: #FAEEDA;
-    --zero: #E24B4A; --zero-bg: #FCEBEB;
-    --accent: #378ADD; --accent-bg: #E6F1FB;
-    --font: 'Noto Sans TC', system-ui, sans-serif;
-  }
-  body { background: var(--bg); font-family: var(--font); color: var(--text-primary); font-size: 14px; line-height: 1.6; }
-  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
-  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .02em; }
-  header .subtitle { font-size: 12px; color: var(--text-muted); }
-  .header-right { margin-left: auto; display: flex; gap: 8px; }
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); transition: background .15s; }
-  .btn:hover { background: var(--bg); }
-  .btn-primary { background: var(--text-primary); color: #fff; border-color: var(--text-primary); }
-  .btn-primary:hover { background: #333; }
-  .btn-danger { background: var(--zero); color: #fff; border-color: var(--zero); }
-  .btn-danger:hover { background: #c23c3b; }
-  .btn-success { background: var(--ok); color: #fff; border-color: var(--ok); }
-  .btn-success:hover { background: #178a64; }
-  .btn-accent { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .btn-accent:hover { background: #2a6fb5; }
-  .btn-sm { padding: 4px 10px; font-size: 12px; }
-  .layout { display: flex; flex-direction: column; min-height: 100%; }
-  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0; display: flex; overflow-x: auto; }
-  .nav-section { display: none; }
-  .nav-item { display: flex; align-items: center; gap: 8px; padding: 12px 16px; font-size: 13px; cursor: pointer; color: var(--text-secondary); border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; transition: all .12s; }
-  .nav-item:hover { background: var(--bg); color: var(--text-primary); }
-  .nav-item.active { background: var(--accent-bg); color: var(--accent); border-left-color: transparent; border-bottom-color: var(--accent); font-weight: 500; }
-  .nav-icon { font-size: 16px; width: 20px; text-align: center; }
-  .badge { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
-  .badge-low { background: var(--low-bg); color: var(--low); }
-  main { padding: 24px; }
-  .page { display: none; }
-  .page.active { display: block; }
-  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-  .stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
-  .stat-val { font-size: 26px; font-weight: 600; line-height: 1; }
-  .stat-val.ok { color: var(--ok); }
-  .stat-val.low { color: var(--low); }
-  .stat-val.zero { color: var(--zero); }
-  .sec-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin: 20px 0 10px; letter-spacing: .04em; text-transform: uppercase; }
-  .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px; }
-  .inv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; position: relative; transition: box-shadow .15s, border-color .15s; }
-  .inv-card:hover { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(55,138,221,.08); }
-  .inv-card .cat { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; }
-  .inv-card .name { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; padding-right: 20px; }
-  .inv-card .qty { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 4px; cursor: pointer; }
-  .inv-card .qty.ok { color: var(--ok); }
-  .inv-card .qty.low { color: var(--low); }
-  .inv-card .qty.zero { color: var(--zero); }
-  .status-pill { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 20px; font-weight: 500; }
-  .pill-ok { background: var(--ok-bg); color: var(--ok); }
-  .pill-low { background: var(--low-bg); color: var(--low); }
-  .pill-zero { background: var(--zero-bg); color: var(--zero); }
-  .card-actions { display: flex; gap: 4px; margin-top: 8px; }
-  .card-btn { flex: 1; padding: 4px 0; text-align: center; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid; transition: opacity .12s; }
-  .card-btn:hover { opacity: .75; }
-  .card-btn-in { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
-  .card-btn-out { background: var(--zero-bg); color: var(--zero); border-color: var(--zero); }
-  .del-btn { position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border-radius: 50%; background: transparent; border: none; color: var(--text-muted); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: background .12s, color .12s; }
-  .del-btn:hover { background: var(--zero-bg); color: var(--zero); }
-  .bar-list { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
-  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .bar-label { width: 90px; font-size: 12px; color: var(--text-secondary); text-align: right; flex-shrink: 0; }
-  .bar-track { flex: 1; height: 12px; background: var(--bg); border-radius: 4px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 4px; transition: width .5s cubic-bezier(.4,0,.2,1); }
-  .bar-val { width: 28px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
-  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 200; align-items: center; justify-content: center; }
-  .overlay.open { display: flex; }
-  .modal { background: var(--surface); border-radius: 14px; padding: 24px; width: 400px; max-width: 95vw; box-shadow: 0 12px 40px rgba(0,0,0,.15); }
-  .modal h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-  .modal .modal-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 20px; }
-  .form-group { margin-bottom: 14px; }
-  .form-label { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; display: block; }
-  .form-input { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; font-family: var(--font); background: var(--bg); color: var(--text-primary); outline: none; transition: border-color .15s; }
-  .form-input:focus { border-color: var(--accent); background: var(--surface); }
-  select.form-input { cursor: pointer; }
-  .modal-actions { display: flex; gap: 8px; margin-top: 20px; }
-  .modal-actions .btn { flex: 1; justify-content: center; }
-  .action-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
-  .action-tab { flex: 1; padding: 8px; text-align: center; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; transition: all .15s; color: var(--text-secondary); }
-  .action-tab.active-in { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); font-weight: 600; }
-  .action-tab.active-out { background: var(--zero-bg); border-color: var(--zero); color: var(--zero); font-weight: 600; }
-
-  /* ── 裝備管理 table ── */
-  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { background: var(--bg); font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
-  td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary); vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: var(--bg); }
-  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
-  .tag-in { background: var(--ok-bg); color: var(--ok); }
-  .tag-out { background: var(--zero-bg); color: var(--zero); }
-  .group-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--accent-bg); color: var(--accent); font-weight: 500; }
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text-primary); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px; transform: translateY(80px); opacity: 0; transition: all .3s; z-index: 300; }
-  .toast.show { transform: translateY(0); opacity: 1; }
-  .empty { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; }
-  .manage-toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
-  .manage-toolbar input { flex: 1; max-width: 260px; }
-  .confirm-bar { background: var(--zero-bg); border: 1px solid var(--zero); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--zero); }
-  .confirm-bar .btn { flex-shrink: 0; }
-  .edit-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: var(--font); background: var(--surface); }
-  .edit-input:focus { border-color: var(--accent); outline: none; }
-  .export-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .export-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 10px; }
-  .export-icon { font-size: 28px; }
-  .export-title { font-size: 15px; font-weight: 600; }
-  .export-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; flex: 1; }
-  .export-preview { font-size: 12px; color: var(--text-muted); background: var(--bg); border-radius: 6px; padding: 6px 10px; }
-  .export-btn { width: 100%; justify-content: center; margin-top: 4px; }
-  .export-note { background: var(--accent-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
-
-  /* ── 雲端同步狀態指示器 ── */
-  #sync-status-bar { transition: color .3s; }
-  .sync-writing { color: var(--accent) !important; }
-  .sync-ok { color: var(--ok) !important; }
-  .sync-err { color: var(--zero) !important; }
-  .fsa-note { background: var(--accent-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 16px; }
-  /* 處理中浮動提示（iframe 內自帶一份，視覺與主程式的 showBusyToast 一致） */
-  #ppe-busy { display: none; position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 400; background: var(--surface); color: var(--text-primary); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 18px; font-size: 13px; align-items: center; gap: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.15); }
-  #ppe-busy.show { display: flex; }
-  #ppe-busy .spin { width: 14px; height: 14px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; display: inline-block; animation: ppeSpin .7s linear infinite; flex-shrink: 0; }
-  @keyframes ppeSpin { to { transform: rotate(360deg); } }
-  .btn:disabled { opacity: .55; cursor: not-allowed; }
-  .card-btn.busy, .del-btn.busy { opacity: .5; pointer-events: none; }
-  @media (max-width: 768px) {
-    .layout { grid-template-columns: 1fr; }
-    nav { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0; }
-    .nav-section { display: none; }
-    .nav-item { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; padding: 12px 14px; }
-    .nav-item.active { border-bottom-color: var(--accent); border-left-color: transparent; }
-    .stats-row { grid-template-columns: repeat(2, 1fr); }
-  }
-</style>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
-</head>
-<body>
-
-<header>
-  <div>
-    <h1>🦺 個人防護具庫存管理</h1>
-    <div class="subtitle sync-ok" id="sync-status-bar">☁ 已連接雲端資料庫，所有操作即時同步</div>
-  </div>
-  <div class="header-right">
-    <button class="btn" id="btn-reload" onclick="reloadAll(this)" title="重新從雲端讀取最新資料">🔄 重新整理</button>
-    <button class="btn btn-success" onclick="openModal('in')">＋ 進貨</button>
-    <button class="btn btn-danger" onclick="openModal('out')">－ 領取</button>
-  </div>
-</header>
-
-<div id="ppe-busy"><span class="spin"></span><span id="ppe-busy-msg">處理中...</span></div>
-
-<div class="layout">
-  <nav>
-    <div class="nav-section">主選單</div>
-    <div class="nav-item active" onclick="showPage('overview',this)"><span class="nav-icon">📊</span> 庫存總覽</div>
-    <div class="nav-item" onclick="showPage('chart',this)"><span class="nav-icon">📈</span> 圖形分析</div>
-    <div class="nav-item" onclick="showPage('log',this)"><span class="nav-icon">📋</span> 異動紀錄</div>
-    <div class="nav-section">管理</div>
-    <div class="nav-item" id="nav-low" onclick="showPage('low',this)">
-      <span class="nav-icon">⚠️</span> 偏低品項
-      <span class="badge badge-low" id="low-badge">0</span>
-    </div>
-    <div class="nav-item" id="nav-purchase" onclick="showPage('purchase',this)">
-      <span class="nav-icon">🛒</span> 採購裝備
-      <span class="badge badge-low" id="purchase-badge">0</span>
-    </div>
-    <div class="nav-item" onclick="showPage('manage',this)"><span class="nav-icon">⚙️</span> 裝備管理</div>
-    <div class="nav-item" onclick="showPage('export',this)"><span class="nav-icon">📊</span> 匯出 / 備份</div>
-  </nav>
-
-  <main>
-    <\!-- 總覽 -->
-    <div class="page active" id="page-overview">
-      <div class="stats-row" id="stats-row"></div>
-      <div id="inv-sections"></div>
-    </div>
-
-    <\!-- 圖形 -->
-    <div class="page" id="page-chart">
-      <div class="sec-title">安全鞋（按尺碼）</div>
-      <div class="bar-list" id="bar-shoes"></div>
-      <div class="sec-title">背心（按款式）</div>
-      <div class="bar-list" id="bar-vests"></div>
-      <div class="sec-title">台中端</div>
-      <div class="bar-list" id="bar-taichung"></div>
-      <div class="sec-title">其他品項</div>
-      <div class="bar-list" id="bar-others"></div>
-    </div>
-
-    <\!-- 紀錄 -->
-    <div class="page" id="page-log">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>時間</th><th>類型</th><th>品項</th><th>數量</th><th>人員</th><th>備註</th></tr></thead>
-          <tbody id="log-tbody"><tr><td colspan="6" class="empty">尚無異動紀錄</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <\!-- 偏低 -->
-    <div class="page" id="page-low">
-      <div class="inv-grid" id="low-grid"></div>
-    </div>
-
-    <\!-- 採購裝備 -->
-    <div class="page" id="page-purchase">
-      <div class="manage-toolbar">
-        <button class="btn btn-accent" onclick="openPurchaseModal()">＋ 新增採購申請</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>品項</th>
-              <th>數量</th>
-              <th>需求人員</th>
-              <th>編輯人員</th>
-              <th>登記時間</th>
-              <th style="text-align:center">狀態</th>
-              <th style="text-align:center">操作</th>
-            </tr>
-          </thead>
-          <tbody id="purchase-tbody"><tr><td colspan="7" class="empty">尚無採購申請</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <\!-- 匯出 / 備份 -->
-    <div class="page" id="page-export">
-
-      <div class="fsa-note" id="cloud-sync-note">
-        <b>☁ 雲端同步說明</b><br>
-        所有品項、異動紀錄與採購申請都直接存放在公司的 <b>Google 試算表</b>，
-        每次進貨 / 領取 / 新增裝備都會<b>立即寫回雲端</b>，不需要手動按任何儲存按鈕，
-        任何一台電腦或手機打開這個頁面看到的都是同一份最新資料。<br>
-        下方的「下載」功能只是<b>另存一份當下的快照</b>給主管看，不會影響雲端資料。
-      </div>
-
-      <div class="export-grid">
-
-        <div class="export-card" style="border-color:var(--accent);background:var(--accent-bg)">
-          <div class="export-icon">☁</div>
-          <div class="export-title">雲端資料庫狀態</div>
-          <div class="export-desc">本模組已改為直接讀寫 Google 試算表（防護具品項清單 / 防護具異動紀錄 / 防護具採購申請三個分頁），不再依賴本機瀏覽器儲存。</div>
-          <div class="export-preview" id="cloud-status-preview">☁ 已連接雲端資料庫，所有操作即時同步</div>
-          <button class="btn btn-accent export-btn" onclick="reloadAll(this)">🔄 重新讀取雲端資料</button>
-        </div>
-
-        <div class="export-card">
-          <div class="export-icon">📋</div>
-          <div class="export-title">備份：庫存清冊</div>
-          <div class="export-desc">下載所有品項的目前庫存數量、類別、群組與狀態，適合存檔或給主管確認。</div>
-          <div class="export-preview" id="preview-inv">共 <b id="prev-inv-count">0</b> 筆品項</div>
-          <button class="btn btn-success export-btn" onclick="exportInventory()">⬇ 下載庫存清冊</button>
-        </div>
-
-        <div class="export-card">
-          <div class="export-icon">📈</div>
-          <div class="export-title">異動紀錄同步</div>
-          <div class="export-desc">下載所有進貨與領取的歷史紀錄，包含時間、人員、品項與前後庫存量。如果你有時候會先把新紀錄手動寫在 Excel 裡，填好後可以直接在這裡上傳，系統會自動比對、只把系統裡還沒有的新紀錄補進來，已經同步過的不會重複新增。</div>
-          <div class="export-preview">共 <b id="prev-log-count">0</b> 筆紀錄</div>
-          <button class="btn btn-accent export-btn" onclick="exportLogs()">⬇ 下載異動紀錄</button>
-          <button class="btn export-btn" style="margin-top:8px;" onclick="document.getElementById('log-import-input').click()">⬆ 上傳異動紀錄</button>
-          <input type="file" id="log-import-input" accept=".xlsx,.xls" style="display:none" onchange="handlePpeLogImport(event)">
-        </div>
-
-        <div class="export-card">
-          <div class="export-icon">✏️</div>
-          <div class="export-title">盤點匯入</div>
-          <div class="export-desc">下載盤點表現場清點填數字，或直接把清點好的 Excel（含「品項名稱」＋「目前庫存／實際清點」欄位）上傳，系統會自動比對差異、產生「盤點調整」紀錄，不用再手動一筆筆輸入。</div>
-          <div class="export-preview">包含所有 <b id="prev-count-count">0</b> 個品項</div>
-          <button class="btn export-btn" onclick="exportCountSheet()">⬇ 下載盤點表</button>
-          <button class="btn btn-accent export-btn" style="margin-top:8px;" onclick="document.getElementById('count-import-input').click()">⬆ 上傳盤點結果</button>
-          <input type="file" id="count-import-input" accept=".xlsx,.xls" style="display:none" onchange="handlePpeCountImport(event)">
-        </div>
-
-        <div class="export-card">
-          <div class="export-icon">🛒</div>
-          <div class="export-title">備份：採購申請</div>
-          <div class="export-desc">下載所有同事提出的採購裝備申請，包含品項、數量、需求人員、編輯人員與採購狀態。</div>
-          <div class="export-preview">共 <b id="prev-purchase-count">0</b> 筆申請</div>
-          <button class="btn export-btn" onclick="exportPurchases()">⬇ 下載採購申請</button>
-        </div>
-
-      </div>
-    </div>
-
-    <\!-- 裝備管理 -->
-    <div class="page" id="page-manage">
-      <div id="delete-confirm-bar" style="display:none"></div>
-      <div class="manage-toolbar">
-        <button class="btn btn-accent" onclick="openAddModal()">＋ 新增裝備</button>
-        <input class="form-input" id="manage-search" placeholder="搜尋品項名稱…" oninput="renderManageTable()" style="max-width:240px">
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>品項名稱</th>
-              <th>類別</th>
-              <th>群組</th>
-              <th style="text-align:center">目前庫存</th>
-              <th style="text-align:center">操作</th>
-            </tr>
-          </thead>
-          <tbody id="manage-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </main>
-</div>
-
-<\!-- 進貨/領取 Modal -->
-<div class="overlay" id="overlay" onclick="closeModalOutside(event)">
-  <div class="modal">
-    <h2 id="modal-title">新增異動</h2>
-    <div class="modal-sub" id="modal-sub">選擇品項並輸入數量</div>
-    <div class="action-tabs">
-      <div class="action-tab active-in" id="tab-in" onclick="setType('in')">＋ 進貨 / 補庫</div>
-      <div class="action-tab" id="tab-out" onclick="setType('out')">－ 領取 / 扣除</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">品項</label>
-      <select class="form-input" id="sel-item"></select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">數量</label>
-      <input type="number" min="1" class="form-input" id="inp-qty" value="1">
-    </div>
-    <div class="form-group">
-      <label class="form-label">日期時間</label>
-      <input type="datetime-local" class="form-input" id="inp-time">
-      <div style="font-size:12px;margin-top:4px;color:var(--text-muted);">預設是現在，如果要補登之前的紀錄，可以改成實際發生的日期時間。</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">人員 / 事由</label>
-      <input type="text" class="form-input" id="inp-person" placeholder="姓名或說明（選填）">
-    </div>
-    <div class="form-group">
-      <label class="form-label">備註</label>
-      <input type="text" class="form-input" id="inp-note" placeholder="選填">
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">取消</button>
-      <button class="btn btn-primary" id="modal-submit" onclick="submitModal()">確認</button>
-    </div>
-  </div>
-</div>
-
-<\!-- 新增裝備 Modal -->
-<div class="overlay" id="add-overlay" onclick="closeAddOutside(event)">
-  <div class="modal">
-    <h2>新增裝備品項</h2>
-    <div class="modal-sub">填寫後將立即出現在庫存清單中</div>
-    <div class="form-group">
-      <label class="form-label">品項名稱 <span style="color:var(--zero)">*</span></label>
-      <input type="text" class="form-input" id="add-name" placeholder="例：安全帽 L">
-    </div>
-    <div class="form-group">
-      <label class="form-label">類別（顯示於卡片頂端）</label>
-      <input type="text" class="form-input" id="add-cat" placeholder="例：安全帽、手套、背心…">
-    </div>
-    <div class="form-group">
-      <label class="form-label">群組分類</label>
-      <select class="form-input" id="add-group">
-        <option value="main">主要裝備</option>
-        <option value="vest">背心</option>
-        <option value="shoe">安全鞋</option>
-        <option value="taichung">台中端</option>
-        <option value="other">其他</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">初始庫存數量</label>
-      <input type="number" min="0" class="form-input" id="add-qty" value="0">
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeAddModal()">取消</button>
-      <button class="btn btn-accent" id="add-submit-btn" onclick="submitAdd(this)">新增</button>
-    </div>
-  </div>
-</div>
-
-<\!-- 新增採購申請 Modal -->
-<div class="overlay" id="purchase-overlay" onclick="closePurchaseOutside(event)">
-  <div class="modal">
-    <h2 id="purchase-modal-title">新增採購申請</h2>
-    <div class="modal-sub">同事需要採購裝備時，可在此記錄需求</div>
-    <div class="form-group">
-      <label class="form-label">品項 <span style="color:var(--zero)">*</span></label>
-      <input type="text" class="form-input" id="purchase-item" list="purchase-item-list" placeholder="例：安全帽 L、雨鞋 40…">
-      <datalist id="purchase-item-list"></datalist>
-    </div>
-    <div class="form-group">
-      <label class="form-label">數量 <span style="color:var(--zero)">*</span></label>
-      <input type="number" min="1" class="form-input" id="purchase-qty" value="1">
-    </div>
-    <div class="form-group">
-      <label class="form-label">需求人員</label>
-      <input type="text" class="form-input" id="purchase-requester" placeholder="提出採購需求的同事姓名">
-    </div>
-    <div class="form-group">
-      <label class="form-label">編輯人員</label>
-      <input type="text" class="form-input" id="purchase-editor" placeholder="登記此筆申請的人員姓名">
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closePurchaseModal()">取消</button>
-      <button class="btn btn-accent" id="purchase-submit-btn" onclick="submitPurchase()">新增</button>
-    </div>
-  </div>
-</div>
-
-<\!-- 刪除確認 Modal -->
-<div class="overlay" id="del-overlay" onclick="closeDelOutside(event)">
-  <div class="modal">
-    <h2>確認刪除</h2>
-    <div class="modal-sub" id="del-sub">此操作無法復原，該品項的異動紀錄將保留。</div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeDelModal()">取消</button>
-      <button class="btn btn-danger" id="del-submit-btn" onclick="confirmDelete(this)">確認刪除</button>
-    </div>
-  </div>
-</div>
-
-<!-- 盤點匯入 Modal -->
-<div class="overlay" id="count-overlay" onclick="closeCountOutside(event)">
-  <div class="modal" style="width:640px;max-width:95vw;max-height:82vh;overflow-y:auto;">
-    <h2>盤點匯入 － 確認調整</h2>
-    <div class="modal-sub" id="count-sub"></div>
-    <div class="table-wrap" style="margin-bottom:12px;">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead><tr style="background:var(--bg);">
-          <th style="text-align:left;padding:8px;">品項</th>
-          <th style="text-align:right;padding:8px;">系統庫存</th>
-          <th style="text-align:right;padding:8px;">盤點數量</th>
-          <th style="text-align:right;padding:8px;">差異</th>
-        </tr></thead>
-        <tbody id="count-diff-body"></tbody>
-      </table>
-    </div>
-    <div id="count-unmatched" class="modal-sub" style="color:var(--low);"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeCountModal()">取消</button>
-      <button class="btn btn-accent" id="count-submit-btn" onclick="submitCountImport(this)">確認套用</button>
-    </div>
-  </div>
-</div>
-
-<!-- 異動紀錄匯入 Modal -->
-<div class="overlay" id="log-import-overlay" onclick="closeLogImportOutside(event)">
-  <div class="modal" style="width:680px;max-width:95vw;max-height:82vh;overflow-y:auto;">
-    <h2>異動紀錄匯入 － 確認新增</h2>
-    <div class="modal-sub" id="log-import-sub"></div>
-    <div class="table-wrap" style="margin-bottom:12px;">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead><tr style="background:var(--bg);">
-          <th style="text-align:left;padding:8px;">時間</th>
-          <th style="text-align:left;padding:8px;">類型</th>
-          <th style="text-align:left;padding:8px;">品項</th>
-          <th style="text-align:right;padding:8px;">數量</th>
-          <th style="text-align:left;padding:8px;">人員/事由</th>
-        </tr></thead>
-        <tbody id="log-import-body"></tbody>
-      </table>
-    </div>
-    <div id="log-import-warn" class="modal-sub" style="color:var(--low);"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeLogImportModal()">取消</button>
-      <button class="btn btn-accent" id="log-import-submit-btn" onclick="submitLogImport(this)">確認新增</button>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-
-<script>
-/* ============================= 雲端資料層（Google 試算表） =============================
-   這個模組原本把資料存在瀏覽器 localStorage（ppe_inv / ppe_logs / ppe_purchases），
-   另外再用「連結 Excel」(File System Access API) 寫回本機檔案。那個作法有兩個問題：
-     1. 換一台電腦 / 換瀏覽器就看不到資料；
-     2. 「匯入 Excel」會整包覆蓋現有庫存，選錯檔案就整份資料不見。
-   現已全面改為直接讀寫 Google 試算表的三個分頁（與系統其他模組同一個後端）：
-     防護具品項清單 / 防護具異動紀錄 / 防護具採購申請
-   注意：這份 HTML 是用 iframe srcdoc 載入的，屬於獨立的執行環境，
-   沒辦法直接呼叫外層主程式的 apiList / apiUpsert，所以這裡自帶一份最小的 API helper。
-*/
-const PPE_API_URL = 'https://script.google.com/macros/s/AKfycbxReHCmCeF1kPhYlxFSOzZv2dgnHAkvsh6i9LD91lSFM_gx8RJzb8Hl84_CfGU6qe_S/exec';
-const PPE_BOOK = 'cctv';
-const SHEET_ITEMS = '防護具品項清單';
-const SHEET_LOGS = '防護具異動紀錄';
-const SHEET_PURCHASES = '防護具採購申請';
-
-// iframe srcdoc 的 storage origin 在多數瀏覽器是隔離的，讀不到主頁存的名字時就重問一次。
-function getCurrentUser() {
-  let u = '';
-  try { u = localStorage.getItem('cctv-current-user') || ''; } catch (e) { u = ''; }
-  if (!u) {
-    u = (prompt('請輸入您的姓名（用於紀錄建立/修改人員，僅需輸入一次）：', '') || '').trim() || '未知人員';
-    try { localStorage.setItem('cctv-current-user', u); } catch (e) {}
-  }
-  return u;
-}
-
-/* ── 處理中提示：用計數器，重疊的請求不會提早把提示收起來 ── */
-let __ppeBusy = 0;
-function showBusy(msg) {
-  __ppeBusy++;
-  const m = document.getElementById('ppe-busy-msg');
-  if (m) m.textContent = msg || '處理中...';
-  const el = document.getElementById('ppe-busy');
-  if (el) el.classList.add('show');
-}
-function hideBusy() {
-  __ppeBusy = Math.max(0, __ppeBusy - 1);
-  if (__ppeBusy > 0) return;
-  const el = document.getElementById('ppe-busy');
-  if (el) el.classList.remove('show');
-}
-// 按下去的那顆按鈕在等待期間變成停用 +「儲存中...」，避免重複送出、也讓人知道沒有當掉。
-// label 傳 null 代表只停用不改文字（例如卡片上的小按鈕）。
-async function withButton(btn, label, fn) {
-  let original = null;
-  if (btn) {
-    original = btn.textContent;
-    btn.classList.add('busy');
-    if ('disabled' in btn) btn.disabled = true;
-    if (label) btn.textContent = label;
-  }
-  try {
-    return await fn();
-  } finally {
-    if (btn) {
-      btn.classList.remove('busy');
-      if ('disabled' in btn) btn.disabled = false;
-      if (label) btn.textContent = original;
-    }
-  }
-}
-
-async function ppeApiList(sheet) {
-  showBusy('讀取中...');
-  try {
-    const url = PPE_API_URL + '?action=list&book=' + PPE_BOOK + '&sheet=' + encodeURIComponent(sheet);
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || '讀取失敗');
-    return json.data || [];
-  } finally { hideBusy(); }
-}
-async function ppeApiUpsert(sheet, record) {
-  showBusy('儲存中...');
-  try {
-    const payload = { action: 'upsert', book: PPE_BOOK, sheet: sheet, record: record, user: getCurrentUser() };
-    const res = await fetch(PPE_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || '寫入失敗');
-    return json.data;
-  } finally { hideBusy(); }
-}
-async function ppeApiDelete(sheet, idValue) {
-  showBusy('刪除中...');
-  try {
-    const payload = { action: 'delete', book: PPE_BOOK, sheet: sheet, id: idValue };
-    const res = await fetch(PPE_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || '刪除失敗');
-  } finally { hideBusy(); }
-}
-
-/* ── 小工具 ── */
-function uid(prefix) { return (prefix || '') + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-function num(v) { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
-function pad2(n) { return String(n).padStart(2, '0'); }
-function fmtTime(d) { return d.getFullYear() + '/' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
-// Google 試算表如果把「2026/09/09 10:35」這格認成日期，apiList 會回傳 ISO 字串，這裡轉回原本的顯示格式。
-function cleanTime(v) {
-  if (v == null || v === '') return '';
-  const s = String(v);
-  if (/^\\d{4}-\\d{2}-\\d{2}T/.test(s)) {
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) {
-      const t = fmtTime(d);
-      return t.slice(-6) === ' 00:00' ? t.slice(0, -6) : t;
-    }
-  }
-  return s;
-}
-
-/* ── 群組：程式內用英文 key，試算表存中文名稱 ── */
-const GROUPS = [
-  { key: 'main', label: '主要裝備' },
-  { key: 'vest', label: '背心' },
-  { key: 'shoe', label: '安全鞋' },
-  { key: 'taichung', label: '台中端' },
-  { key: 'other', label: '其他' }
-];
-function groupLabel(g) { const f = GROUPS.find(x => x.key === g); return f ? f.label : (g || '其他'); }
-function groupKey(v) {
-  const s = String(v == null ? '' : v).trim();
-  const byLabel = GROUPS.find(x => x.label === s);
-  if (byLabel) return byLabel.key;
-  const byKey = GROUPS.find(x => x.key === s);
-  return byKey ? byKey.key : 'other';
-}
-
-/* ── 分頁欄位 <-> 程式物件 對應 ── */
-function itemToRow(i) {
-  return { '品項ID': i.id || '', '類別': i.cat || '', '品項名稱': i.name || '', '群組': groupLabel(i.group),
-           '目前庫存': i.qty, '期初庫存': (i.base === '' || i.base == null) ? '' : i.base, '備註': i.note || '' };
-}
-function itemFromRow(s) {
-  return { id: String(s['品項ID'] == null ? '' : s['品項ID']).trim(), cat: String(s['類別'] == null ? '' : s['類別']),
-           name: String(s['品項名稱'] == null ? '' : s['品項名稱']), group: groupKey(s['群組']),
-           qty: num(s['目前庫存']), base: (s['期初庫存'] === '' || s['期初庫存'] == null) ? '' : num(s['期初庫存']),
-           note: s['備註'] == null ? '' : String(s['備註']) };
-}
-function logToRow(l) {
-  return { '紀錄ID': l.id || '', '時間': l.time || '', '類型': l.typeLabel || '', '品項名稱': l.name || '',
-           '異動數量': l.delta, '人員或事由': l.person || '', '備註': l.note || '',
-           '異動前庫存': l.prev === '' || l.prev == null ? '' : l.prev, '異動後庫存': l.after === '' || l.after == null ? '' : l.after };
-}
-function logFromRow(s) {
-  const delta = num(s['異動數量']);
-  return { id: String(s['紀錄ID'] == null ? '' : s['紀錄ID']).trim(), time: cleanTime(s['時間']),
-           typeLabel: String(s['類型'] == null ? '' : s['類型']).trim(), name: String(s['品項名稱'] == null ? '' : s['品項名稱']),
-           delta: delta, qty: Math.abs(delta), person: String(s['人員或事由'] == null ? '' : s['人員或事由']),
-           note: s['備註'] == null ? '' : String(s['備註']),
-           prev: s['異動前庫存'] === '' || s['異動前庫存'] == null ? '' : num(s['異動前庫存']),
-           after: s['異動後庫存'] === '' || s['異動後庫存'] == null ? '' : num(s['異動後庫存']) };
-}
-function purchaseToRow(p) {
-  return { '申請ID': p.id || '', '品項': p.item || '', '數量': p.qty, '需求人員': p.requester || '',
-           '編輯人員': p.editor || '', '登記時間': p.time || '', '狀態': p.status === 'done' ? '已採購' : '待採購' };
-}
-function purchaseFromRow(s) {
-  const st = String(s['狀態'] == null ? '' : s['狀態']);
-  return { id: String(s['申請ID'] == null ? '' : s['申請ID']).trim(), item: String(s['品項'] == null ? '' : s['品項']),
-           qty: num(s['數量']), requester: String(s['需求人員'] == null ? '' : s['需求人員']),
-           editor: String(s['編輯人員'] == null ? '' : s['編輯人員']), time: cleanTime(s['登記時間']),
-           status: st.indexOf('已採購') >= 0 ? 'done' : 'pending' };
-}
-
-/* ── 記憶體中的資料（來源一律是雲端，這裡只是快取，方便畫面即時更新）── */
-let inventory = [];
-let logs = [];
-let purchases = [];
-let modalType = 'in';
-let preselect = null;
-let pendingDeleteId = null;
-let editingPurchaseId = null;
-
-function setSyncStatus(state, text) {
-  const bar = document.getElementById('sync-status-bar');
-  if (bar) { bar.className = 'subtitle' + (state ? ' sync-' + state : ''); bar.textContent = text; }
-  const prev = document.getElementById('cloud-status-preview');
-  if (prev) prev.textContent = text;
-}
-
-async function loadAll() {
-  setSyncStatus('writing', '⏳ 正在讀取雲端資料…');
-  try {
-    const [itemRows, logRows, purchaseRows] = await Promise.all([
-      ppeApiList(SHEET_ITEMS), ppeApiList(SHEET_LOGS), ppeApiList(SHEET_PURCHASES)
-    ]);
-    inventory = itemRows.map(itemFromRow).filter(i => i.id && i.name);
-    logs = logRows.map(logFromRow).filter(l => l.id);
-    purchases = purchaseRows.map(purchaseFromRow).filter(p => p.id);
-    setSyncStatus('ok', '☁ 已連接雲端資料庫，所有操作即時同步');
-    return true;
-  } catch (err) {
-    console.error(err);
-    setSyncStatus('err', '❌ 雲端讀取失敗：' + (err && err.message ? err.message : err));
-    showToast('雲端讀取失敗，請確認 Google 試算表已建立「防護具品項清單 / 防護具異動紀錄 / 防護具採購申請」三個分頁');
-    return false;
-  }
-}
-async function reloadAll(btn) {
-  await withButton(btn, '讀取中...', async () => { await loadAll(); renderAll(); });
-  showToast('已重新讀取雲端資料');
-}
-
-// 一筆異動：先寫「異動紀錄」，再更新「品項清單」的目前庫存。兩個都成功才更新畫面。
-// time 可以不傳，不傳就用「現在」；表單上加了日期時間欄位後，補登以前的紀錄就會傳實際發生的時間進來。
-async function commitTransaction(item, delta, typeLabel, person, note, time) {
-  const prev = item.qty;
-  const after = prev + delta;
-  const log = { id: uid('r'), time: time || fmtTime(new Date()), typeLabel: typeLabel, name: item.name,
-                delta: delta, qty: Math.abs(delta), person: person || '', note: note || '', prev: prev, after: after };
-  await ppeApiUpsert(SHEET_LOGS, logToRow(log));
-  const updated = Object.assign({}, item, { qty: after });
-  await ppeApiUpsert(SHEET_ITEMS, itemToRow(updated));
-  item.qty = after;
-  logs.push(log);
-  return log;
-}
-function statusClass(q) { return q===0?'zero':q<=4?'low':'ok'; }
-function statusLabel(q) { return q===0?'❌ 缺貨':q<=4?'⚠️ 偏低':'✅ 充足'; }
-function pillClass(q) { return q===0?'pill-zero':q<=4?'pill-low':'pill-ok'; }
-function barColor(q) { return q===0?'#E24B4A':q<=4?'#BA7517':'#1D9E75'; }
-
-function renderAll() {
-  renderStats(); renderOverview(); renderCharts(); renderLow(); renderLog(); renderManageTable(); renderPurchase(); updateLowBadge(); updatePurchaseBadge(); updateExportCounts();
-}
-
-function renderStats() {
-  const okC = inventory.filter(i=>i.qty>=5).length;
-  const lowC = inventory.filter(i=>i.qty>0&&i.qty<5).length;
-  const zeroC = inventory.filter(i=>i.qty===0).length;
-  document.getElementById('stats-row').innerHTML = \`
-    <div class="stat-card"><div class="stat-label">品項總數</div><div class="stat-val">\${inventory.length}</div></div>
-    <div class="stat-card"><div class="stat-label">庫存充足</div><div class="stat-val ok">\${okC}</div></div>
-    <div class="stat-card"><div class="stat-label">庫存偏低</div><div class="stat-val low">\${lowC}</div></div>
-    <div class="stat-card"><div class="stat-label">缺貨品項</div><div class="stat-val zero">\${zeroC}</div></div>\`;
-}
-
-function renderOverview() {
-  const groups = [{key:'main',label:'主要裝備'},{key:'vest',label:'背心'},{key:'shoe',label:'安全鞋'},{key:'taichung',label:'台中端'},{key:'other',label:'其他'}];
-  let html = '';
-  groups.forEach(g => {
-    const items = inventory.filter(i=>i.group===g.key);
-    if (!items.length) return;
-    html += \`<div class="sec-title">\${g.label}</div><div class="inv-grid">\`;
-    items.forEach(item => {
-      const sc = statusClass(item.qty);
-      html += \`<div class="inv-card">
-        <button class="del-btn" title="刪除此品項" onclick="askDelete('\${item.id}')">×</button>
-        <div class="cat">\${item.cat}</div>
-        <div class="name">\${item.name}</div>
-        <div class="qty \${sc}" onclick="openModal('out','\${item.id}')" title="點擊領取">\${item.qty}</div>
-        <span class="status-pill \${pillClass(item.qty)}">\${statusLabel(item.qty)}</span>
-        <div class="card-actions">
-          <div class="card-btn card-btn-in" onclick="openModal('in','\${item.id}')">進貨</div>
-          <div class="card-btn card-btn-out" onclick="openModal('out','\${item.id}')">領取</div>
-        </div>
-      </div>\`;
-    });
-    html += '</div>';
-  });
-  document.getElementById('inv-sections').innerHTML = html;
-}
-
-function renderCharts() {
-  renderBarList('bar-shoes', inventory.filter(i=>i.group==='shoe'));
-  renderBarList('bar-vests', inventory.filter(i=>i.group==='vest'));
-  renderBarList('bar-taichung', inventory.filter(i=>i.group==='taichung'));
-  renderBarList('bar-others', inventory.filter(i=>i.group==='other'));
-}
-function renderBarList(id, items) {
-  if (!items.length) { document.getElementById(id).innerHTML='<div class="empty">無品項</div>'; return; }
-  const max = Math.max(...items.map(i=>i.qty), 1);
-  document.getElementById(id).innerHTML = items.map(item => {
-    const pct = Math.round(item.qty/max*100);
-    return \`<div class="bar-row">
-      <div class="bar-label">\${item.name}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:\${pct}%;background:\${barColor(item.qty)}"></div></div>
-      <div class="bar-val">\${item.qty}</div>
-    </div>\`;
-  }).join('');
-}
-
-function renderLow() {
-  const low = inventory.filter(i=>i.qty<5);
-  if (!low.length) { document.getElementById('low-grid').innerHTML='<div class="empty">目前無偏低或缺貨品項 ✅</div>'; return; }
-  document.getElementById('low-grid').innerHTML = low.map(item => {
-    const sc = statusClass(item.qty);
-    return \`<div class="inv-card">
-      <div class="cat">\${item.cat}</div>
-      <div class="name">\${item.name}</div>
-      <div class="qty \${sc}" onclick="openModal('in','\${item.id}')" title="點擊進貨">\${item.qty}</div>
-      <span class="status-pill \${pillClass(item.qty)}">\${statusLabel(item.qty)}</span>
-      <div class="card-actions">
-        <div class="card-btn card-btn-in" onclick="openModal('in','\${item.id}')">進貨</div>
-      </div>
-    </div>\`;
-  }).join('');
-}
-
-function renderLog() {
-  const tbody = document.getElementById('log-tbody');
-  if (!logs.length) { tbody.innerHTML='<tr><td colspan="6" class="empty">尚無異動紀錄</td></tr>'; return; }
-  // 目前資料量（幾百筆）瀏覽器顯示完全沒問題，就不裁切了；未來如果累積到幾千筆
-  // 造成畫面變慢，再回來加分頁或日期篩選。
-  tbody.innerHTML = [...logs].reverse().map(l=>\`
-    <tr>
-      <td>\${l.time}</td>
-      <td><span class="tag \${l.delta>=0?'tag-in':'tag-out'}">\${l.typeLabel||(l.delta>=0?'進貨':'領取')}</span></td>
-      <td>\${l.name}</td>
-      <td style="font-weight:600">\${l.delta>=0?'+':'−'}\${Math.abs(l.delta)}</td>
-      <td>\${l.person||'—'}</td>
-      <td style="color:var(--text-muted)">\${l.note||'—'}</td>
-    </tr>\`).join('');
-}
-
-function renderManageTable() {
-  const q = (document.getElementById('manage-search')||{value:''}).value.toLowerCase();
-  const items = inventory.filter(i=>!q||i.name.toLowerCase().includes(q)||i.cat.toLowerCase().includes(q));
-  const tbody = document.getElementById('manage-tbody');
-  if (!items.length) { tbody.innerHTML='<tr><td colspan="5" class="empty">沒有符合的品項</td></tr>'; return; }
-  tbody.innerHTML = items.map(item=>\`
-    <tr>
-      <td>
-        <span id="name-display-\${item.id}">\${item.name}</span>
-        <input class="edit-input" id="name-edit-\${item.id}" value="\${item.name}" style="display:none" onblur="saveEdit('\${item.id}','name')" onkeydown="editKeydown(event,'\${item.id}','name')">
-      </td>
-      <td>
-        <span id="cat-display-\${item.id}">\${item.cat}</span>
-        <input class="edit-input" id="cat-edit-\${item.id}" value="\${item.cat}" style="display:none" onblur="saveEdit('\${item.id}','cat')" onkeydown="editKeydown(event,'\${item.id}','cat')">
-      </td>
-      <td><span class="group-badge">\${groupLabel(item.group)}</span></td>
-      <td style="text-align:center;font-weight:600;color:\${barColor(item.qty)}">\${item.qty}</td>
-      <td style="text-align:center">
-        <div style="display:flex;gap:6px;justify-content:center">
-          <button class="btn btn-sm" onclick="startEdit('\${item.id}','name')">改名稱</button>
-          <button class="btn btn-sm" onclick="startEdit('\${item.id}','cat')">改類別</button>
-          <button class="btn btn-sm btn-danger" onclick="askDelete('\${item.id}')">刪除</button>
-        </div>
-      </td>
-    </tr>\`).join('');
-}
-
-function updateLowBadge() {
-  const c = inventory.filter(i=>i.qty<5).length;
-  document.getElementById('low-badge').textContent = c;
-  document.getElementById('low-badge').style.display = c?'inline-block':'none';
-}
-
-// ── 採購裝備申請 ──
-function renderPurchase() {
-  const tbody = document.getElementById('purchase-tbody');
-  if (!purchases.length) { tbody.innerHTML='<tr><td colspan="7" class="empty">尚無採購申請</td></tr>'; return; }
-  tbody.innerHTML = [...purchases].reverse().map(p=>\`
-    <tr>
-      <td>\${p.item}</td>
-      <td style="font-weight:600">\${p.qty}</td>
-      <td>\${p.requester||'—'}</td>
-      <td>\${p.editor||'—'}</td>
-      <td>\${p.time}</td>
-      <td style="text-align:center">
-        <span class="tag \${p.status==='done'?'tag-in':'tag-out'}" style="cursor:pointer" onclick="togglePurchaseDone('\${p.id}',this)" title="點擊切換狀態">\${p.status==='done'?'✅ 已採購':'⏳ 待採購'}</span>
-      </td>
-      <td style="text-align:center">
-        <div style="display:flex;gap:6px;justify-content:center">
-          <button class="btn btn-sm" onclick="startEditPurchase('\${p.id}')">編輯</button>
-          <button class="btn btn-sm btn-danger" onclick="deletePurchase('\${p.id}',this)">刪除</button>
-        </div>
-      </td>
-    </tr>\`).join('');
-}
-
-function updatePurchaseBadge() {
-  const c = purchases.filter(p=>p.status!=='done').length;
-  const badge = document.getElementById('purchase-badge');
-  badge.textContent = c;
-  badge.style.display = c?'inline-block':'none';
-}
-
-function openPurchaseModal() {
-  editingPurchaseId = null;
-  document.getElementById('purchase-modal-title').textContent = '新增採購申請';
-  document.getElementById('purchase-submit-btn').textContent = '新增';
-  document.getElementById('purchase-item-list').innerHTML = inventory.map(i=>\`<option value="\${i.name}">\`).join('');
-  document.getElementById('purchase-item').value = '';
-  document.getElementById('purchase-qty').value = 1;
-  document.getElementById('purchase-requester').value = '';
-  document.getElementById('purchase-editor').value = '';
-  document.getElementById('purchase-overlay').classList.add('open');
-  document.getElementById('purchase-item').focus();
-}
-function startEditPurchase(id) {
-  const p = purchases.find(x=>x.id===id); if (!p) return;
-  editingPurchaseId = id;
-  document.getElementById('purchase-modal-title').textContent = '編輯採購申請';
-  document.getElementById('purchase-submit-btn').textContent = '儲存';
-  document.getElementById('purchase-item-list').innerHTML = inventory.map(i=>\`<option value="\${i.name}">\`).join('');
-  document.getElementById('purchase-item').value = p.item;
-  document.getElementById('purchase-qty').value = p.qty;
-  document.getElementById('purchase-requester').value = p.requester||'';
-  document.getElementById('purchase-editor').value = p.editor||'';
-  document.getElementById('purchase-overlay').classList.add('open');
-  document.getElementById('purchase-item').focus();
-}
-function closePurchaseModal() { document.getElementById('purchase-overlay').classList.remove('open'); editingPurchaseId = null; }
-function closePurchaseOutside(e) { if(e.target===document.getElementById('purchase-overlay')) closePurchaseModal(); }
-async function submitPurchase() {
-  const btn = document.getElementById('purchase-submit-btn');
-  const item = document.getElementById('purchase-item').value.trim();
-  const qty = parseInt(document.getElementById('purchase-qty').value, 10);
-  const requester = document.getElementById('purchase-requester').value.trim();
-  const editor = document.getElementById('purchase-editor').value.trim();
-  if (!item) { showToast('請填寫品項'); return; }
-  if (!qty || qty < 1) { showToast('請輸入有效數量'); return; }
-  const time = fmtTime(new Date());
-  const editingId = editingPurchaseId;
-  const existing = editingId ? purchases.find(x=>x.id===editingId) : null;
-  const rec = existing
-    ? Object.assign({}, existing, { item: item, qty: qty, requester: requester, editor: editor, time: time })
-    : { id: uid('p'), item: item, qty: qty, requester: requester, editor: editor, time: time, status: 'pending' };
-  try {
-    await withButton(btn, '儲存中...', () => ppeApiUpsert(SHEET_PURCHASES, purchaseToRow(rec)));
-  } catch (err) {
-    showToast('儲存失敗：' + (err && err.message ? err.message : err));
-    return;
-  }
-  if (existing) { Object.assign(existing, rec); showToast('採購申請已更新'); }
-  else { purchases.push(rec); showToast('採購申請已新增'); }
-  renderAll(); closePurchaseModal();
-}
-async function togglePurchaseDone(id, el) {
-  const p = purchases.find(x=>x.id===id); if (!p) return;
-  const next = p.status==='done' ? 'pending' : 'done';
-  try {
-    await withButton(el, null, () => ppeApiUpsert(SHEET_PURCHASES, purchaseToRow(Object.assign({}, p, { status: next }))));
-  } catch (err) { showToast('更新失敗：' + (err && err.message ? err.message : err)); return; }
-  p.status = next;
-  renderAll();
-}
-async function deletePurchase(id, btn) {
-  const p = purchases.find(x=>x.id===id); if (!p) return;
-  if (!confirm(\`確定要刪除「\${p.item}」的採購申請嗎？\`)) return;
-  try {
-    await withButton(btn, '刪除中...', () => ppeApiDelete(SHEET_PURCHASES, id));
-  } catch (err) { showToast('刪除失敗：' + (err && err.message ? err.message : err)); return; }
-  purchases = purchases.filter(x=>x.id!==id);
-  renderAll();
-  showToast('採購申請已刪除');
-}
-
-// ── 編輯品名/類別 ──
-function startEdit(id, field) {
-  document.getElementById(\`\${field}-display-\${id}\`).style.display='none';
-  const inp = document.getElementById(\`\${field}-edit-\${id}\`);
-  inp.style.display='inline-block';
-  inp.focus(); inp.select();
-}
-async function saveEdit(id, field) {
-  const inp = document.getElementById(\`\${field}-edit-\${id}\`);
-  if (!inp || inp.dataset.saving === '1') return;
-  const val = inp.value.trim();
-  const item = inventory.find(i=>i.id===id);
-  const closeBack = () => { inp.style.display='none'; const d = document.getElementById(\`\${field}-display-\${id}\`); if (d) d.style.display='inline'; };
-  if (!item || !val || val === item[field]) { closeBack(); return; }
-  inp.dataset.saving = '1'; inp.disabled = true;
-  try {
-    await ppeApiUpsert(SHEET_ITEMS, itemToRow(Object.assign({}, item, { [field]: val })));
-  } catch (err) {
-    inp.dataset.saving = ''; inp.disabled = false;
-    showToast('儲存失敗：' + (err && err.message ? err.message : err));
-    return;
-  }
-  item[field] = val;
-  renderAll();
-  showToast('已更新「' + item.name + '」');
-}
-function editKeydown(e, id, field) {
-  if (e.key==='Enter') { e.target.blur(); }
-  if (e.key==='Escape') { e.target.style.display='none'; document.getElementById(\`\${field}-display-\${id}\`).style.display='inline'; }
-}
-
-// ── 刪除 ──
-function askDelete(id) {
-  pendingDeleteId = id;
-  const item = inventory.find(i=>i.id===id);
-  document.getElementById('del-sub').textContent = \`確定要刪除「\${item.name}」嗎？此操作無法復原。\`;
-  document.getElementById('del-overlay').classList.add('open');
-}
-async function confirmDelete(btn) {
-  if (!pendingDeleteId) return;
-  const id = pendingDeleteId;
-  const item = inventory.find(i=>i.id===id);
-  if (!item) { closeDelModal(); return; }
-  try {
-    await withButton(btn, '刪除中...', () => ppeApiDelete(SHEET_ITEMS, id));
-  } catch (err) { showToast('刪除失敗：' + (err && err.message ? err.message : err)); return; }
-  inventory = inventory.filter(i=>i.id!==id);
-  pendingDeleteId = null;
-  renderAll(); closeDelModal();
-  showToast(\`「\${item.name}」已刪除（過往異動紀錄保留）\`);
-}
-function closeDelModal() { document.getElementById('del-overlay').classList.remove('open'); pendingDeleteId=null; }
-function closeDelOutside(e) { if(e.target===document.getElementById('del-overlay')) closeDelModal(); }
-
-// ── 新增 ──
-function openAddModal() { document.getElementById('add-overlay').classList.add('open'); document.getElementById('add-name').focus(); }
-function closeAddModal() { document.getElementById('add-overlay').classList.remove('open'); }
-function closeAddOutside(e) { if(e.target===document.getElementById('add-overlay')) closeAddModal(); }
-async function submitAdd(btn) {
-  const name = document.getElementById('add-name').value.trim();
-  if (!name) { showToast('請填寫品項名稱'); return; }
-  const cat = document.getElementById('add-cat').value.trim() || name;
-  const group = document.getElementById('add-group').value;
-  const qty = Math.max(0, parseInt(document.getElementById('add-qty').value)||0);
-  const rec = { id: uid('item_'), cat: cat, name: name, qty: qty, group: group, base: qty, note: '' };
-  try {
-    await withButton(btn, '儲存中...', () => ppeApiUpsert(SHEET_ITEMS, itemToRow(rec)));
-  } catch (err) { showToast('新增失敗：' + (err && err.message ? err.message : err)); return; }
-  inventory.push(rec);
-  renderAll(); closeAddModal();
-  document.getElementById('add-name').value='';
-  document.getElementById('add-cat').value='';
-  document.getElementById('add-qty').value='0';
-  showToast(\`「\${name}」已新增，初始庫存 \${qty} 件\`);
-}
-
-// ── 進貨/領取 Modal ──
-// datetime-local 欄位要的格式是 "YYYY-MM-DDTHH:MM"（沒有秒），這裡用目前時間當預設值。
-function nowForDatetimeLocal() {
-  const d = new Date();
-  return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-}
-// 把表單填的日期時間轉成系統統一的顯示格式；沒填或格式看不懂就直接用現在時間。
-function datetimeLocalToFmt(v) {
-  if (!v) return fmtTime(new Date());
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? fmtTime(new Date()) : fmtTime(d);
-}
-function openModal(type, itemId) {
-  modalType = type; preselect = itemId||null; setType(type);
-  const sel = document.getElementById('sel-item');
-  sel.innerHTML = inventory.map(i=>\`<option value="\${i.id}">\${i.name}（剩 \${i.qty}）</option>\`).join('');
-  if (preselect) sel.value = preselect;
-  document.getElementById('inp-qty').value=1;
-  document.getElementById('inp-time').value = nowForDatetimeLocal();
-  document.getElementById('inp-person').value='';
-  document.getElementById('inp-note').value='';
-  document.getElementById('overlay').classList.add('open');
-}
-function setType(t) {
-  modalType=t;
-  document.getElementById('tab-in').className='action-tab'+(t==='in'?' active-in':'');
-  document.getElementById('tab-out').className='action-tab'+(t==='out'?' active-out':'');
-  document.getElementById('modal-submit').className='btn '+(t==='in'?'btn-success':'btn-danger');
-  document.getElementById('modal-submit').textContent=t==='in'?'確認進貨':'確認領取';
-}
-function closeModal() { document.getElementById('overlay').classList.remove('open'); }
-function closeModalOutside(e) { if(e.target===document.getElementById('overlay')) closeModal(); }
-async function submitModal() {
-  const btn=document.getElementById('modal-submit');
-  const id=document.getElementById('sel-item').value;
-  const qty=parseInt(document.getElementById('inp-qty').value,10);
-  const person=document.getElementById('inp-person').value.trim();
-  const note=document.getElementById('inp-note').value.trim();
-  if(!qty||qty<1){showToast('請輸入有效數量');return;}
-  const item=inventory.find(i=>i.id===id); if(!item)return;
-  if(modalType==='out'&&qty>item.qty){
-    // 目前庫存可能因為之前「領取後歸還但未恢復庫存」之類的狀況已經是 0 或負數，
-    // 這種情況下還是要讓使用者能把「實際發生的領取」記下來，只是要跳出來提醒一下，
-    // 不能像以前一樣直接擋掉、讓紀錄整筆消失卻沒有任何提示。
-    const proceed = confirm(\`\${item.name} 目前庫存僅剩 \${item.qty} 件，登記後將變成 \${item.qty - qty} 件（負數代表帳面已經對不上，可能是先前有未計入的異動）。\n\n確定仍要登記這筆領取嗎？\`);
-    if (!proceed) return;
-  }
-  const typeLabel = modalType==='in' ? '進貨' : '領取';
-  const delta = modalType==='in' ? qty : -qty;
-  const time = datetimeLocalToFmt(document.getElementById('inp-time').value);
-  try {
-    await withButton(btn, '儲存中...', () => commitTransaction(item, delta, typeLabel, person, note, time));
-  } catch (err) {
-    showToast('儲存失敗：' + (err && err.message ? err.message : err));
-    return;
-  }
-  renderAll(); closeModal();
-  showToast(\`\${item.name} \${typeLabel} \${qty} 件，剩餘 \${item.qty} 件\`);
-}
-
-// ── Navigation ──
-function showPage(page, el) {
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  document.getElementById('page-'+page).classList.add('active');
-  el.classList.add('active');
-}
-
-// ── Toast ──
-function showToast(msg) {
-  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),3000);
-}
-
-// ── 更新匯出頁面計數 ──
-function updateExportCounts() {
-  const ic = document.getElementById('prev-inv-count');
-  const lc = document.getElementById('prev-log-count');
-  const cc = document.getElementById('prev-count-count');
-  const pc = document.getElementById('prev-purchase-count');
-  if(ic) ic.textContent = inventory.length;
-  if(lc) lc.textContent = logs.length;
-  if(cc) cc.textContent = inventory.length;
-  if(pc) pc.textContent = purchases.length;
-}
-
-// ── 取得今日日期字串 ──
-function today() {
-  const n = new Date();
-  return \`\${n.getFullYear()}\${String(n.getMonth()+1).padStart(2,'0')}\${String(n.getDate()).padStart(2,'0')}\`;
-}
-
-// ── 匯出：目前庫存清冊 ──
-function exportInventory() {
-  const statusText = q => q===0?'缺貨':q<=4?'偏低':'充足';
-  const rows = [['類別','品項名稱','群組','目前庫存','狀態']];
-  inventory.forEach(i => rows.push([i.cat, i.name, groupLabel(i.group), i.qty, statusText(i.qty)]));
-  downloadXlsx(rows, '庫存清冊', \`PPE_庫存清冊_\${today()}.xlsx\`, {
-    colWidths: [16, 18, 12, 10, 8],
-    headerColor: '1D9E75'
-  });
-  showToast('庫存清冊已下載');
-}
-
-// ── 匯出：異動紀錄 ──
-function exportLogs() {
-  const rows = [['時間','類型','品項名稱','異動數量','人員/事由','備註','異動前','異動後']];
-  [...logs].reverse().forEach(l => rows.push([
-    l.time, l.typeLabel || (l.delta>=0?'進貨':'領取'), l.name,
-    (l.delta>=0?'+':'-') + Math.abs(l.delta),
-    l.person||'', l.note||'',
-    l.prev??'', l.after??''
-  ]));
-  downloadXlsx(rows, '異動紀錄', \`PPE_異動紀錄_\${today()}.xlsx\`, {
-    colWidths: [18, 8, 18, 10, 14, 16, 10, 10],
-    headerColor: '378ADD'
-  });
-  showToast('異動紀錄已下載');
-}
-
-// ── 匯出：採購申請 ──
-function exportPurchases() {
-  const rows = [['品項','數量','需求人員','編輯人員','登記時間','狀態']];
-  [...purchases].reverse().forEach(p => rows.push([
-    p.item, p.qty, p.requester||'', p.editor||'', p.time, p.status==='done'?'已採購':'待採購'
-  ]));
-  downloadXlsx(rows, '採購申請', \`PPE_採購申請_\${today()}.xlsx\`, {
-    colWidths: [18, 8, 14, 14, 18, 10],
-    headerColor: '378ADD'
-  });
-  showToast('採購申請已下載');
-}
-
-// ── 匯出：空白盤點表 ──
-function exportCountSheet() {
-  const rows = [['類別','品項名稱','群組','系統庫存（件）','實際清點（件）','差異','備註']];
-  inventory.forEach(i => rows.push([i.cat, i.name, groupLabel(i.group), i.qty, '', '', '']));
-  downloadXlsx(rows, '盤點表', \`PPE_盤點表_\${today()}.xlsx\`, {
-    colWidths: [16, 18, 12, 14, 14, 10, 16],
-    headerColor: 'BA7517'
-  });
-  showToast('空白盤點表已下載');
-}
-
-// ── 核心：用 SheetJS 產生 xlsx ──
-function downloadXlsx(rows, sheetName, filename, opts) {
-  if (typeof XLSX === 'undefined') { showToast('Excel 套件載入中，請稍後再試…'); return; }
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  // 欄寬
-  if (opts.colWidths) ws['!cols'] = opts.colWidths.map(w=>({wch:w}));
-
-  // 標題列樣式（需要 xlsx-style；SheetJS community 版用 !ref 做即可）
-  // 凍結首列
-  ws['!freeze'] = {xSplit:0, ySplit:1};
-
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, filename);
-}
-
-// ── 盤點匯入：上傳清點好的 Excel，自動比對系統庫存與清點數量的差異 ──
-// 支援兩種欄位格式：①「下載盤點表」範本（品項名稱 + 實際清點（件）），
-// ②含「目前庫存」欄位的品項清單（例如自己另外維護的 Excel 匯出檔）。
-// 找不到對應品項名稱的列會列在「未比對到」清單，不會被更動；比對到但數量相同的列也不會產生任何異動。
-function parseCountFile(wb) {
-  const NAME_KEYS = ['品項名稱', '品項'];
-  const QTY_KEYS = ['實際清點（件）', '實際清點(件)', '實際清點', '盤點數量', '目前庫存'];
-  let best = null;
-  wb.SheetNames.forEach(sn => {
-    let json;
-    try { json = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' }); } catch (e) { return; }
-    if (!json.length) return;
-    const headers = Object.keys(json[0]);
-    const nameKey = NAME_KEYS.find(k => headers.includes(k));
-    const qtyKey = QTY_KEYS.find(k => headers.includes(k));
-    if (!nameKey || !qtyKey) return;
-    const rows = json.map(r => ({ name: String(r[nameKey]||'').trim(), counted: r[qtyKey] })).filter(r => r.name);
-    if (!best || rows.length > best.rows.length) best = { sheetName: sn, rows };
-  });
-  return best;
-}
-async function handlePpeCountImport(event) {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  if (typeof XLSX === 'undefined') { showToast('Excel 套件載入中，請稍後再試…'); return; }
-  let wb;
-  try {
-    const buf = await file.arrayBuffer();
-    wb = XLSX.read(buf, { type: 'array' });
-  } catch (err) {
-    alert('讀取檔案失敗：' + (err && err.message ? err.message : err));
-    return;
-  }
-  const parsed = parseCountFile(wb);
-  if (!parsed) {
-    alert('在這份 Excel 裡找不到可辨識的「品項名稱」＋「盤點數量／目前庫存」欄位。\\n\\n可以用「下載盤點表」產生的範本填寫後再上傳，或使用含「目前庫存」欄位的品項清單。');
-    return;
-  }
-  const diffs = [];
-  const unmatched = [];
-  parsed.rows.forEach(r => {
-    const counted = r.counted;
-    if (counted === '' || counted === null || counted === undefined || isNaN(Number(counted))) return; // 空白格代表現場沒填，跳過不處理
-    const item = inventory.find(i => i.name === r.name);
-    if (!item) { unmatched.push(r.name); return; }
-    const countedNum = Math.round(Number(counted));
-    const delta = countedNum - item.qty;
-    if (delta !== 0) diffs.push({ item, before: item.qty, after: countedNum, delta });
-  });
-  if (diffs.length === 0) {
-    alert(unmatched.length
-      ? '沒有需要調整的品項。\\n\\n另外有 ' + unmatched.length + ' 個品項在系統中找不到對應名稱：\\n' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':'')
-      : '沒有需要調整的品項，系統庫存與盤點結果一致 ✅');
-    return;
-  }
-  showCountImportPreview(diffs, unmatched);
-}
-let pendingCountDiffs = [];
-function showCountImportPreview(diffs, unmatched) {
-  pendingCountDiffs = diffs;
-  document.getElementById('count-sub').textContent = '共比對出 ' + diffs.length + ' 個品項數量有差異，確認後會依序寫入「盤點調整」異動紀錄並更新庫存（原本的歷史紀錄不會被刪除或覆蓋）。';
-  document.getElementById('count-diff-body').innerHTML = diffs.map(function(d) {
-    return '<tr style="border-top:1px solid var(--border);">'
-      + '<td style="padding:8px;">' + d.item.name + '</td>'
-      + '<td style="padding:8px;text-align:right;">' + d.before + '</td>'
-      + '<td style="padding:8px;text-align:right;">' + d.after + '</td>'
-      + '<td style="padding:8px;text-align:right;color:' + (d.delta>0?'#1D9E75':'#E24B4A') + ';">' + (d.delta>0?'+':'') + d.delta + '</td>'
-      + '</tr>';
-  }).join('');
-  const um = document.getElementById('count-unmatched');
-  um.textContent = unmatched.length ? ('⚠ 有 ' + unmatched.length + ' 個品項在系統中找不到對應名稱，未列入調整：' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':'')) : '';
-  document.getElementById('count-overlay').classList.add('open');
-}
-function closeCountModal() { document.getElementById('count-overlay').classList.remove('open'); pendingCountDiffs = []; }
-function closeCountOutside(e) { if (e.target === document.getElementById('count-overlay')) closeCountModal(); }
-async function submitCountImport(btn) {
-  if (!pendingCountDiffs.length) { closeCountModal(); return; }
-  const diffs = pendingCountDiffs;
-  await withButton(btn, '寫入中...', async () => {
-    const person = getCurrentUser();
-    for (const d of diffs) {
-      try {
-        await commitTransaction(d.item, d.delta, '盤點調整', person, '盤點匯入自動產生');
-      } catch (err) {
-        console.error('盤點調整寫入失敗：', d.item.name, err);
-      }
-    }
-  });
-  renderAll();
-  closeCountModal();
-  showToast('盤點匯入完成，已調整 ' + diffs.length + ' 個品項');
-}
-
-// ── 異動紀錄匯入：如果你有時候是先把新的進貨/領取寫在 Excel 裡，再用這個功能一次同步 ──
-// 因為 Excel 裡的每一列沒有系統的「紀錄ID」，比對重複只能靠「時間＋品項＋數量＋人員」四個欄位
-// 是否完全一樣：一樣的話視為已經同步過（跳過，不重複新增），不一樣才當成新紀錄寫入。
-// 所以上傳前系統會先列出「即將新增」的清單讓你確認一次，不會靜默寫入。
-function normalizeExcelTime(v) {
-  let t = '';
-  if (v instanceof Date && !isNaN(v.getTime())) {
-    t = fmtTime(v);
-  } else if (v == null || v === '') {
-    return '';
-  } else {
-    const s = String(v).trim();
-    const m = s.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})(?:[ T](\\d{1,2}):(\\d{1,2}))?/);
-    if (m) {
-      const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]), Number(m[4]||0), Number(m[5]||0));
-      if (!isNaN(d.getTime())) t = fmtTime(d);
-      else return s;
-    } else {
-      return s;
-    }
-  }
-  // 跟 cleanTime() 的規則保持一致：原始資料只有日期、沒有時間的情況，系統既有紀錄讀進來也會把
-  // 「 00:00」去掉，這裡要用同一套規則，不然這種資料每次都會被誤判成系統裡還沒有的新紀錄。
-  return t.slice(-6) === ' 00:00' ? t.slice(0, -6) : t;
-}
-// 只比對到「日期」，不比對到分鐘：Excel 儲存日期時間常有幾分鐘的捨入誤差（跟系統實際寫入的時間
-// 對不齊是正常的，不是資料錯誤），如果連分鐘都要求完全一樣，反而會讓明明已經同步過的紀錄被誤判
-// 成新紀錄、重複匯入。同一天、同品項、同數量、同人員，就視為同一筆。
-function txSignature(time, name, delta, person) {
-  const datePart = String(time || '').split(' ')[0];
-  return datePart + '|' + name + '|' + Math.round(Number(delta)||0) + '|' + String(person||'').trim();
-}
-function parseTransactionFile(wb) {
-  const REQUIRED = ['時間', '類型', '品項名稱', '異動數量'];
-  let best = null;
-  wb.SheetNames.forEach(sn => {
-    let json;
-    try { json = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' }); } catch (e) { return; }
-    if (!json.length) return;
-    const headers = Object.keys(json[0]);
-    if (!REQUIRED.every(k => headers.includes(k))) return;
-    const rows = json.map(r => ({
-      time: normalizeExcelTime(r['時間']),
-      typeLabel: String(r['類型']||'').trim(),
-      name: String(r['品項名稱']||'').trim(),
-      delta: r['異動數量'],
-      person: String(r['人員/事由']||r['人員或事由']||'').trim(),
-      note: String(r['備註']||'').trim()
-    })).filter(r => r.name && r.time);
-    if (!best || rows.length > best.rows.length) best = { sheetName: sn, rows };
-  });
-  return best;
-}
-async function handlePpeLogImport(event) {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  if (typeof XLSX === 'undefined') { showToast('Excel 套件載入中，請稍後再試…'); return; }
-  let wb;
-  try {
-    const buf = await file.arrayBuffer();
-    wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  } catch (err) {
-    alert('讀取檔案失敗：' + (err && err.message ? err.message : err));
-    return;
-  }
-  const parsed = parseTransactionFile(wb);
-  if (!parsed) {
-    alert('在這份 Excel 裡找不到可辨識的「時間／類型／品項名稱／異動數量」欄位。\\n\\n請確認格式跟「下載異動紀錄」的備份範本一致。');
-    return;
-  }
-  const existingKeys = new Set(logs.map(l => txSignature(l.time, l.name, l.delta, l.person)));
-  const toImport = [];
-  let skippedCount = 0;
-  const unmatched = [];
-  let invalidCount = 0;
-  parsed.rows.forEach(r => {
-    const delta = Number(r.delta);
-    if (!r.time || isNaN(delta) || delta === 0) { invalidCount++; return; }
-    const item = inventory.find(i => i.name === r.name);
-    if (!item) { unmatched.push(r.name); return; }
-    const deltaRounded = Math.round(delta);
-    const sig = txSignature(r.time, r.name, deltaRounded, r.person);
-    if (existingKeys.has(sig)) { skippedCount++; return; }
-    toImport.push({ item, time: r.time, typeLabel: r.typeLabel || (deltaRounded>=0?'進貨':'領取'), person: r.person, note: r.note, delta: deltaRounded });
-  });
-  if (toImport.length === 0) {
-    alert('沒有需要新增的紀錄（共比對 ' + parsed.rows.length + ' 筆，其中 ' + skippedCount + ' 筆系統已有、' + unmatched.length + ' 筆品項名稱對不到、' + invalidCount + ' 筆時間或數量格式看不懂）。');
-    return;
-  }
-  showLogImportPreview(toImport, skippedCount, unmatched, invalidCount);
-}
-let pendingLogImports = [];
-function showLogImportPreview(toImport, skippedCount, unmatched, invalidCount) {
-  toImport.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
-  pendingLogImports = toImport;
-  let subText = '共比對出 ' + toImport.length + ' 筆是系統裡還沒有的新紀錄，確認後會依序寫入「異動紀錄」並更新對應品項的庫存。';
-  if (skippedCount) subText += '（另有 ' + skippedCount + ' 筆內容與系統已有的紀錄完全相同，視為已同步過，不會重複新增。）';
-  // 安全提醒：這個功能是設計給「最近才手動記在 Excel、還沒同步」的少數幾筆用的。
-  // 如果清單裡出現很久以前的日期，很可能是不小心上傳了完整的舊版歷史 Excel，
-  // 舊資料若跟系統當初匯入時的格式有出入（比對不到），就會被誤判成新紀錄、重複計入庫存異動。
-  const earliest = toImport.length ? toImport[0].time : '';
-  const earliestDate = earliest ? new Date(earliest.replace(/\\//g, '-').replace(' ', 'T')) : null;
-  const daysAgo = earliestDate && !isNaN(earliestDate.getTime()) ? Math.floor((Date.now() - earliestDate.getTime()) / 86400000) : null;
-  let warnHtml = '';
-  if (daysAgo !== null && daysAgo > 3) {
-    warnHtml = '<div style="color:var(--zero);font-weight:600;margin-bottom:8px;">⚠️ 清單中最早的一筆是 ' + earliest + '（' + daysAgo + ' 天前），這個功能只適合同步「最近才手寫在 Excel、還沒同步」的少數幾筆。如果你是不小心上傳了完整的舊版歷史 Excel，請先按取消，只保留真的還沒同步過的那幾筆再重新上傳，避免舊資料被重複計入庫存。</div>';
-  }
-  document.getElementById('log-import-sub').innerHTML = warnHtml + subText;
-  document.getElementById('log-import-body').innerHTML = toImport.map(function(r) {
-    return '<tr style="border-top:1px solid var(--border);">'
-      + '<td style="padding:8px;">' + r.time + '</td>'
-      + '<td style="padding:8px;">' + r.typeLabel + '</td>'
-      + '<td style="padding:8px;">' + r.item.name + '</td>'
-      + '<td style="padding:8px;text-align:right;color:' + (r.delta>0?'#1D9E75':'#E24B4A') + ';">' + (r.delta>0?'+':'') + r.delta + '</td>'
-      + '<td style="padding:8px;">' + r.person + '</td>'
-      + '</tr>';
-  }).join('');
-  const warn = [];
-  if (unmatched.length) warn.push('⚠ 有 ' + unmatched.length + ' 個品項名稱在系統中找不到對應，未列入：' + unmatched.slice(0,10).join('、') + (unmatched.length>10?'…':''));
-  if (invalidCount) warn.push('⚠ 有 ' + invalidCount + ' 筆時間或數量格式看不懂，已略過');
-  document.getElementById('log-import-warn').textContent = warn.join('　');
-  document.getElementById('log-import-overlay').classList.add('open');
-}
-function closeLogImportModal() { document.getElementById('log-import-overlay').classList.remove('open'); pendingLogImports = []; }
-function closeLogImportOutside(e) { if (e.target === document.getElementById('log-import-overlay')) closeLogImportModal(); }
-// 跟 commitTransaction 幾乎一樣，差別只在時間用 Excel 原本記錄的時間，不是「現在」。
-async function commitImportedTransaction(item, delta, typeLabel, person, note, time) {
-  const prev = item.qty;
-  const after = prev + delta;
-  const log = { id: uid('r'), time: time, typeLabel: typeLabel, name: item.name,
-                delta: delta, qty: Math.abs(delta), person: person || '', note: note || '', prev: prev, after: after };
-  await ppeApiUpsert(SHEET_LOGS, logToRow(log));
-  const updated = Object.assign({}, item, { qty: after });
-  await ppeApiUpsert(SHEET_ITEMS, itemToRow(updated));
-  item.qty = after;
-  logs.push(log);
-  return log;
-}
-async function submitLogImport(btn) {
-  if (!pendingLogImports.length) { closeLogImportModal(); return; }
-  const items = pendingLogImports;
-  const failed = [];
-  let okCount = 0;
-  await withButton(btn, '寫入中...', async () => {
-    for (const r of items) {
-      const noteText = (r.note ? r.note + '　' : '') + '(Excel 匯入同步)';
-      try {
-        await commitImportedTransaction(r.item, r.delta, r.typeLabel, r.person, noteText, r.time);
-        okCount++;
-      } catch (err) {
-        console.error('匯入異動紀錄失敗：', r.item.name, err);
-        failed.push(r.time + ' ' + r.item.name + '（' + (err && err.message ? err.message : err) + '）');
-      }
-    }
-  });
-  // 寫入之後不能只靠剛剛推進記憶體裡的資料畫面，要重新跟雲端要一次最新資料，
-  // 這樣畫面顯示的才會是「試算表裡真的存到什麼」，不是「程式以為存到什麼」。
-  await loadAll();
-  renderAll();
-  closeLogImportModal();
-  if (failed.length) {
-    alert('⚠️ 有 ' + failed.length + ' 筆寫入失敗，請截圖以下內容回報：\\n\\n' + failed.slice(0,10).join('\\n') + (failed.length>10?'\\n…等':''));
-    return;
-  }
-  showToast('已匯入 ' + okCount + ' 筆異動紀錄');
-}
-
-// ── 啟動：先把三個雲端分頁的資料抓下來，再畫畫面 ──
-(async function init() {
-  renderAll();               // 先畫空畫面，避免載入期間整頁空白
-  await loadAll();
-  renderAll();
-})();<\/script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>
-</body>
-</html>
-`;
 
 const WORKTASKS_HTML = `<!doctype html>
 <html lang="zh-Hant">
@@ -3883,6 +2448,7 @@ const NAV = [
   // 外部系統：改成右側內嵌顯示，不跳新分頁，所以用 key（跟其他頁面一樣）。
   { key: 'airTaichung', label: '空氣站資訊（台中）' },
   { key: 'airTongxiao', label: '空氣站資訊（通霄）' },
+  { key: 'links', label: '附屬網址' },
 ];
 
 function renderNav() {
@@ -3937,11 +2503,12 @@ function render() {
   else if (state.page === 'taichung') c.innerHTML = renderEquip('台中端', 'equipTaichung');
   else if (state.page === 'tongxiao') c.innerHTML = renderEquip('通霄端', 'equipTongxiao');
   else if (state.page === 'gps') c.innerHTML = renderGps();
-  else if (state.page === 'ppe') { c.innerHTML = renderPpe(); const f = document.getElementById('ppeFrame'); if (f) f.srcdoc = PPE_HTML; }
+  else if (state.page === 'ppe') c.innerHTML = renderPpe();
   else if (state.page === 'coverall') { c.innerHTML = renderCoverall(); const cf = document.getElementById('coverallFrame'); if (cf) cf.srcdoc = COVERALL_HTML; }
   else if (state.page === 'worktasks') { c.innerHTML = renderWorktasks(); const wf = document.getElementById('worktasksFrame'); if (wf) wf.srcdoc = WORKTASKS_HTML; }
   else if (state.page === 'airTaichung') c.innerHTML = renderAirStation('空氣站資訊（台中）', 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-taichung');
   else if (state.page === 'airTongxiao') c.innerHTML = renderAirStation('空氣站資訊（通霄）', 'http://inms.amitie.com.tw/app/ui/people-supervisor/uae-tongxiao');
+  else if (state.page === 'links') c.innerHTML = renderLinks();
 }
 
 /* ============================= Dashboard ============================= */
@@ -5498,12 +4065,12 @@ async function importGpsExcel(event) {
   }
 }
 
-/* ============================= 個人防護具（內嵌模組） ============================= */
+/* ============================= 個人防護具（獨立網頁：ppe.html） ============================= */
 function renderPpe() {
   return `
   <h1 class="page-title">🦺 個人防護具庫存管理</h1>
-  <p class="text-dim" style="margin-bottom:12px;">此模組資料獨立於 CCTV 平台，內建 Excel 連結／匯出功能，操作方式與原系統相同。</p>
-  <iframe id="ppeFrame" class="ppe-frame"></iframe>`;
+  <p class="text-dim" style="margin-bottom:12px;">此模組已拆成獨立網頁檔案（ppe.html），也可以直接開啟使用：<a href="ppe.html" target="_blank" rel="noopener" style="color:var(--accent);">在新分頁開啟</a>。內建 Excel 連結／匯出功能，操作方式與原系統相同。</p>
+  <iframe id="ppeFrame" class="ppe-frame" src="ppe.html"></iframe>`;
 }
 
 /* ============================= NMDC Coverall（內嵌模組） ============================= */
@@ -5528,6 +4095,65 @@ function renderAirStation(title, url) {
   <h1 class="page-title">🌫️ ${esc(title)}</h1>
   <p class="text-dim" style="margin-bottom:12px;">此頁面為外部系統內嵌顯示，資料以該系統為準。若畫面空白或無法顯示，可能是對方系統不允許內嵌，<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--accent);">點此開新分頁前往</a>。</p>
   <iframe src="${esc(url)}" class="ppe-frame"></iframe>`;
+}
+
+/* ============================= 附屬網址 ============================= */
+function normalizeLinkUrl(u) {
+  u = (u||'').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  return u;
+}
+function renderLinks() {
+  const items = DB.links;
+  const cards = items.map(it => `<div class="link-card">
+      <div class="link-card-actions">
+        <button class="icon-btn" title="編輯" onclick="showLinkForm('${it.id}')">✎</button>
+        <button class="icon-btn danger" title="刪除" onclick="confirmDelLink('${it.id}','${esc(it.name).replace(/'/g,"\\'")}')">🗑</button>
+      </div>
+      <div class="link-card-name">${esc(it.name)}</div>
+      <div class="link-card-url-wrap"><a class="link-card-url" href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.url)}</a></div>
+    </div>`).join('') || `<p class="empty-hint" style="grid-column:1/-1;text-align:center;padding:30px 0;">尚未新增任何網址，點右上角「＋ 新增網址」開始新增</p>`;
+
+  return `
+  <h1 class="page-title">🔗 附屬網址</h1>
+  <p class="text-dim" style="margin-bottom:12px;">常用外部連結（如申請表單、協力廠商系統等），可自行新增、編輯、移除。</p>
+  <div class="section-head"><h2 class="section-title">網址清單</h2><button class="btn primary" onclick="showLinkForm()">＋ 新增網址</button></div>
+  <div class="links-grid">${cards}</div>`;
+}
+function showLinkForm(id) {
+  const item = id ? DB.links.find(r => r.id === id) : null;
+  openModal(item ? `編輯網址 · ${esc(item.name)}` : '新增網址', `
+    <div class="form-grid">
+      <input type="hidden" id="lk-id" value="${item?item.id:''}">
+      <input type="hidden" id="lk-created" value="${item?esc(item.createdAt):''}">
+      <label class="field"><span class="field-label mono">名稱</span><input class="input" id="lk-name" value="${item?esc(item.name):''}" placeholder="例如：泰籍移工加班申請"></label>
+      <label class="field"><span class="field-label mono">網址</span><input class="input" id="lk-url" value="${item?esc(item.url):''}" placeholder="https://..."></label>
+      <div class="row-end"><button class="btn primary" id="lk-save-btn" onclick="saveLink(this)">儲存</button></div>
+    </div>`);
+}
+async function saveLink(btn) {
+  const idVal = document.getElementById('lk-id').value;
+  const name = document.getElementById('lk-name').value.trim();
+  const url = normalizeLinkUrl(document.getElementById('lk-url').value);
+  if (!name) { alert('請填寫名稱'); return; }
+  if (!url) { alert('請填寫網址'); return; }
+  const rec = { id: idVal || undefined, name, url, createdAt: document.getElementById('lk-created').value || new Date().toISOString() };
+  const originalLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中...'; }
+  try { await apiUpsert(SHEET_MAP.links.sheet, SHEET_MAP.links.toRow(rec)); await reloadOne('links'); }
+  catch (err) {
+    alert('儲存失敗：' + err + '\n（若是第一次使用，請確認 Google 試算表已新增「附屬網址」分頁）');
+    if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    return;
+  }
+  closeModal(); render();
+}
+function confirmDelLink(id, name) { confirmDialog(`確定要刪除「${name}」這筆網址嗎？`, `doDelLink('${id}')`); }
+async function doDelLink(id) {
+  try { await apiDelete(SHEET_MAP.links.sheet, id); await reloadOne('links'); }
+  catch (err) { alert('刪除失敗：' + err); return; }
+  render();
 }
 
 /* ============================= Excel 匯出 / 匯入 ============================= */
