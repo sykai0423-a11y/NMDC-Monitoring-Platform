@@ -453,19 +453,18 @@ async function apiSaveMonitorMonthly(month, filename, fileUrl) {
 }
 
 // 全域資料快取：畫面渲染時直接讀這裡（同步），寫入/刪除成功後才重新從雲端拉取該類型資料
-let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [], ppeItems: [], links: [] };
+let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [], links: [] };
 
 async function loadAllData() {
   const contentEl = document.getElementById('content');
   contentEl.innerHTML = '<div class="page"><p class="text-dim">連線 Google 雲端讀取資料中…</p></div>';
   try {
-    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, ppeItemRows, linkRows] = await Promise.all([
+    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, linkRows] = await Promise.all([
       apiList('工作日誌'), apiList('明日預計工作'), apiList('POE抽查日誌'), apiList('POE其他需求檔案'),
       apiList('台中端設備清單'), apiList('通霄端設備清單'), apiListMonitor(), apiListMonitorMonthly(),
       apiList('POE預約抽查'), apiList('設備維護紀錄'), apiList('GPS機台資料表'),
       apiList('監看值班表').catch(() => []), // 若試算表尚未新增「監看值班表」分頁，先以空陣列降級，不中斷其他資料讀取
       apiList('路由器更換表').catch(() => []), // 同上，尚未新增「路由器更換表」分頁時先降級成空陣列
-      apiList('防護具品項清單').catch(() => []), // 首頁「PPE 庫存提醒」直接讀雲端，不再依賴 PPE 頁面的 localStorage
       apiList('附屬網址').catch(() => []), // 同上，尚未新增「附屬網址」分頁時先降級成空陣列
     ]);
     DB.patrol = patrolRows.map(SHEET_MAP.patrol.fromRow);
@@ -481,7 +480,6 @@ async function loadAllData() {
     DB.gpsDevices = gpsRows.map(SHEET_MAP.gpsDevices.fromRow);
     DB.duty = dutyRows.map(SHEET_MAP.duty.fromRow);
     DB.router = routerRows.map(SHEET_MAP.router.fromRow);
-    DB.ppeItems = ppeItemRows.map(r => ({ name: String(r['品項名稱'] == null ? '' : r['品項名稱']), qty: Number(r['目前庫存']) || 0 }));
     DB.links = linkRows.map(SHEET_MAP.links.fromRow).sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   } catch (err) {
     contentEl.innerHTML = `<div class="page"><p class="warn-text">雲端資料讀取失敗：${esc(String(err))}</p><button class="btn primary" onclick="loadAllData()">重試</button></div>`;
@@ -493,11 +491,6 @@ async function loadAllData() {
 async function reloadOne(type) {
   if (type === 'monitorFiles') { DB.monitorFiles = await apiListMonitor(); return; }
   if (type === 'monitorMonthly') { DB.monitorMonthly = await apiListMonitorMonthly(); return; }
-  if (type === 'ppeItems') {
-    const rows = await apiList('防護具品項清單');
-    DB.ppeItems = rows.map(r => ({ name: String(r['品項名稱'] == null ? '' : r['品項名稱']), qty: Number(r['目前庫存']) || 0 }));
-    return;
-  }
   if (type === 'links') {
     const rows = await apiList('附屬網址');
     DB.links = rows.map(SHEET_MAP.links.fromRow).sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -1501,23 +1494,6 @@ function renderDashboard() {
     </div>`;
   }).join('');
 
-  // ── PPE 庫存提醒（直接讀雲端 DB.ppeItems，與 Coverall 未領提醒的 localStorage 來源不同）──
-  function ppeReminder() {
-    const inv = DB.ppeItems;
-    if (!inv || !inv.length) return `<p class="text-dim">尚無資料</p>`;
-    const low = inv.filter(i => Number(i.qty) < 5).sort((a,b)=>a.qty-b.qty);
-    if (!low.length) return `<p class="text-dim">庫存皆正常 ✅</p>`;
-    return `<div class="reminder-list">${low.slice(0,6).map(i=>`<div class="reminder-item"><span>${esc(i.name)}</span><span class="warn-text mono">剩 ${i.qty}</span></div>`).join('')}${low.length>6?`<div class="text-dim" style="font-size:12px;">…等共 ${low.length} 項偏低</div>`:''}</div>`;
-  }
-  function coverallReminder() {
-    let emps = null;
-    try { emps = JSON.parse(localStorage.getItem('coverall_employees_v1') || 'null'); } catch(e) {}
-    if (!emps) return `<p class="text-dim">尚無資料（請先開啟一次「NMDC Coverall」頁面）</p>`;
-    const pending = emps.filter(e => !e.jacket_received || !e.pants_received);
-    if (!pending.length) return `<p class="text-dim">全數人員皆已領取 ✅</p>`;
-    return `<div class="reminder-list">${pending.slice(0,6).map(e=>`<div class="reminder-item"><span>${esc(e.name)}（${esc(e.department||'')}）</span><span class="warn-text">未領齊</span></div>`).join('')}${pending.length>6?`<div class="text-dim" style="font-size:12px;">…等共 ${pending.length} 人尚未領齊</div>`:''}</div>`;
-  }
-
   // ── 本週巡檢統計（過去7天，兩端達成天數）──
   function siteWeekRate(site) {
     let count = 0;
@@ -1551,16 +1527,6 @@ function renderDashboard() {
   <div class="viewfinder card" style="margin-top:20px;"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
     <div class="card-head"><span>📅 本週值班表（監看CCTV）</span><button class="btn ghost" onclick="goPage('duty')">前往排班管理</button></div>
     <div class="week-widget">${weekRows}</div>
-  </div>
-  <div class="grid-2" style="margin-top:20px;">
-    <div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
-      <div class="card-head"><span>🦺 PPE 庫存提醒</span></div>
-      ${ppeReminder()}
-    </div>
-    <div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
-      <div class="card-head"><span>🧥 Coverall 未領提醒</span></div>
-      ${coverallReminder()}
-    </div>
   </div>
   <div class="viewfinder card" style="margin-top:20px;"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
     <div class="card-head"><span>📊 本週巡檢達成率（過去7天）</span></div>
