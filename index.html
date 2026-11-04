@@ -280,12 +280,50 @@ function getCurrentUser() {
   return u;
 }
 
-async function apiList(sheet) {
+// 帶「逾時」的 fetch：Google Apps Script 在同時收到大量請求時，偶爾會有少數請求
+// 卡住、永遠不回應（不是失敗、也不會報錯），一般的 fetch 會因此永遠等下去，進而讓整個
+// 頁面卡在「讀取資料中…」。這裡用 AbortController 設定逾時時間，超時就視為失敗、
+// 讓外層可以重試，不會讓整個網頁卡死。
+function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, Object.assign({}, options, { signal: controller.signal })).finally(() => clearTimeout(timer));
+}
+// 讀取資料時：逾時或失敗就自動重試幾次（重試前稍微間隔一下），避開 Apps Script
+// 同時處理太多請求時偶發的卡住問題；重試完還是失敗才真的往外丟錯誤。
+async function apiList(sheet, retries) {
+  if (retries == null) retries = 2;
   const url = `${API_URL}?action=list&book=${BOOK}&sheet=${encodeURIComponent(sheet)}`;
-  const res = await fetch(url);
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || '讀取失敗');
-  return json.data;
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, {}, 15000);
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || '讀取失敗');
+      return json.data;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) await new Promise(r => setTimeout(r, 800 + attempt * 600));
+    }
+  }
+  throw lastErr;
+}
+// 限制「同時」送出的請求數量：一次性送出太多請求（例如 14 個）給 Google Apps Script，
+// 容易讓部分請求卡住不回應；改成最多同時 N 個在跑、其他排隊等前面跑完再送出，
+// 可以大幅降低這個問題發生的機率。taskFns 是一個「函式陣列」（每個元素是 () => Promise）。
+async function runLimited(taskFns, limit) {
+  const results = new Array(taskFns.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < taskFns.length) {
+      const cur = idx++;
+      results[cur] = await taskFns[cur]();
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < Math.min(limit, taskFns.length); i++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
 }
 async function apiUpsert(sheet, record) {
   showBusyToast('儲存中...');
@@ -459,14 +497,16 @@ async function loadAllData() {
   const contentEl = document.getElementById('content');
   contentEl.innerHTML = '<div class="page"><p class="text-dim">連線 Google 雲端讀取資料中…</p></div>';
   try {
-    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, linkRows] = await Promise.all([
-      apiList('工作日誌'), apiList('明日預計工作'), apiList('POE抽查日誌'), apiList('POE其他需求檔案'),
-      apiList('台中端設備清單'), apiList('通霄端設備清單'), apiListMonitor(), apiListMonitorMonthly(),
-      apiList('POE預約抽查'), apiList('設備維護紀錄'), apiList('GPS機台資料表'),
-      apiList('監看值班表').catch(() => []), // 若試算表尚未新增「監看值班表」分頁，先以空陣列降級，不中斷其他資料讀取
-      apiList('路由器更換表').catch(() => []), // 同上，尚未新增「路由器更換表」分頁時先降級成空陣列
-      apiList('附屬網址').catch(() => []), // 同上，尚未新增「附屬網址」分頁時先降級成空陣列
-    ]);
+    // 改成「最多同時 5 個請求」分批讀取（原本是 14 個同時送出，容易讓 Apps Script 卡住、
+    // 部分請求永遠沒回應），搭配 apiList 本身的逾時重試，避免網頁卡在讀取畫面不動。
+    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, linkRows] = await runLimited([
+      () => apiList('工作日誌'), () => apiList('明日預計工作'), () => apiList('POE抽查日誌'), () => apiList('POE其他需求檔案'),
+      () => apiList('台中端設備清單'), () => apiList('通霄端設備清單'), () => apiListMonitor(), () => apiListMonitorMonthly(),
+      () => apiList('POE預約抽查'), () => apiList('設備維護紀錄'), () => apiList('GPS機台資料表'),
+      () => apiList('監看值班表').catch(() => []), // 若試算表尚未新增「監看值班表」分頁，先以空陣列降級，不中斷其他資料讀取
+      () => apiList('路由器更換表').catch(() => []), // 同上，尚未新增「路由器更換表」分頁時先降級成空陣列
+      () => apiList('附屬網址').catch(() => []), // 同上，尚未新增「附屬網址」分頁時先降級成空陣列
+    ], 5);
     DB.patrol = patrolRows.map(SHEET_MAP.patrol.fromRow);
     DB.tomorrow = tomorrowRows.map(SHEET_MAP.tomorrow.fromRow);
     DB.poeChecks = poeCheckRows.map(SHEET_MAP.poeChecks.fromRow);
