@@ -289,21 +289,24 @@ function fetchWithTimeout(url, options, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, Object.assign({}, options, { signal: controller.signal })).finally(() => clearTimeout(timer));
 }
-// 讀取資料時：逾時或失敗就自動重試幾次（重試前稍微間隔一下），避開 Apps Script
-// 同時處理太多請求時偶發的卡住問題；重試完還是失敗才真的往外丟錯誤。
+// 讀取資料時：逾時或失敗就自動重試幾次（重試前稍微間隔一下，次數越多等越久），
+// 因為實測發現 Google Apps Script 偶爾會對「單一」請求（不是同時太多個造成的）
+// 整個卡住不回應超過一分鐘，所以重試次數/等待時間都設得比較寬鬆，盡量讓畫面
+// 最後還是讀得到資料，而不是太快就放棄顯示錯誤。重試完還是失敗才真的往外丟錯誤。
 async function apiList(sheet, retries) {
-  if (retries == null) retries = 2;
+  if (retries == null) retries = 4;
   const url = `${API_URL}?action=list&book=${BOOK}&sheet=${encodeURIComponent(sheet)}`;
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetchWithTimeout(url, {}, 15000);
+      const res = await fetchWithTimeout(url, {}, 20000);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || '讀取失敗');
       return json.data;
     } catch (err) {
       lastErr = err;
-      if (attempt < retries) await new Promise(r => setTimeout(r, 800 + attempt * 600));
+      if (attempt < retries) await new Promise(r => setTimeout(r, 1200 + attempt * 1500));
     }
   }
   throw lastErr;
@@ -495,7 +498,7 @@ let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung:
 
 async function loadAllData() {
   const contentEl = document.getElementById('content');
-  contentEl.innerHTML = '<div class="page"><p class="text-dim">連線 Google 雲端讀取資料中…</p></div>';
+  contentEl.innerHTML = '<div class="page"><p class="text-dim">連線 Google 雲端讀取資料中…（若 Google 回應較慢，最長可能需要等候 1 分鐘左右，請耐心稍候）</p></div>';
   try {
     // 改成「最多同時 5 個請求」分批讀取（原本是 14 個同時送出，容易讓 Apps Script 卡住、
     // 部分請求永遠沒回應），搭配 apiList 本身的逾時重試，避免網頁卡在讀取畫面不動。
