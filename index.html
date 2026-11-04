@@ -199,6 +199,28 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .duty-row.weekend { border-left: 3px solid var(--amber); }
 .duty-date { flex-shrink: 0; width: 120px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; padding-top: 4px; }
 @media (max-width: 700px) { .duty-row { flex-wrap: wrap; } .duty-date { width: 100%; flex-direction: row; gap: 8px; } }
+/* 值班排班表：日曆格狀呈現（每天一格，格內用項目符號列出當天每位人員） */
+.duty-cal-weekrow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.duty-cal-weekday { text-align: center; font-size: 12px; color: var(--text-dim); padding: 2px 0 8px; }
+.duty-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 20px; }
+.duty-cal-cell { min-height: 112px; background: var(--bg-panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.duty-cal-cell.empty { visibility: hidden; }
+.duty-cal-cell.weekend { background: rgba(255,176,32,.07); }
+.duty-cal-cell.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.duty-cal-cell-head { display: flex; align-items: center; justify-content: space-between; }
+.duty-cal-date-num { font-size: 13px; font-weight: 600; }
+.duty-cal-today-tag { font-size: 10px; color: var(--accent); margin-left: 4px; }
+.duty-cal-add { font-size: 15px; line-height: 1; color: var(--text-dim); cursor: pointer; border: none; background: none; padding: 0 2px; }
+.duty-cal-add:hover { color: var(--accent); }
+.duty-cal-people { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; max-height: 130px; }
+.duty-cal-person { display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.duty-cal-person:hover { background: rgba(127,127,127,.12); }
+.duty-cal-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.duty-cal-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) {
+  .duty-cal-grid, .duty-cal-weekrow { grid-template-columns: repeat(7, minmax(60px, 1fr)); }
+  .duty-cal-grid { overflow-x: auto; }
+}
 
 .week-widget { display: flex; flex-direction: column; gap: 6px; }
 .week-widget-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 8px; border-radius: 4px; }
@@ -1604,38 +1626,42 @@ function renderDuty() {
   const cursor = state.dutyCursor;
   const year = cursor.getFullYear(), month = cursor.getMonth();
   const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstWeekday = new Date(year, month, 1).getDay(); // 當月1號是星期幾（0=日），用來決定日曆格前面要留幾格空白對齊
   const weekLabel = ['日','一','二','三','四','五','六'];
   const people = getDutyPeople();
 
-  const rows = [];
+  const cells = [];
+  for (let i=0; i<firstWeekday; i++) cells.push(`<div class="duty-cal-cell empty"></div>`);
   for (let d=1; d<=daysInMonth; d++) {
     const dateObj = new Date(year, month, d);
     const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const wd = dateObj.getDay();
     const isWeekend = wd===0 || wd===6;
     const isToday = key === todayStr();
+    // 同一天可能有多位人員（分別是不同筆排班紀錄），每位用一個項目符號列出來，
+    // 點一下該人員名字可以直接編輯這筆排班（含刪除）。
     const recs = DB.duty.filter(x => x.date === key).sort((a,b)=>(a.id||'').localeCompare(b.id||''));
-    const recHtml = recs.map(r => {
+    const peopleHtml = recs.map(r => {
       const [label, color] = DUTY_TYPE_MAP[r.type] || DUTY_TYPE_MAP['正常值班'];
-      return `<div class="plan-row compact" style="margin-bottom:6px;">
-        <span class="pill" style="background:${color}22;color:${color};border:1px solid ${color}66;flex-shrink:0;">${label}</span>
-        <div class="plan-text"><b>${esc(r.person)}</b>${r.backup?`　代班：${esc(r.backup)}`:''}${r.note?`　<span class="text-dim">${esc(r.note)}</span>`:''}</div>
-        <button class="icon-btn" onclick="showDutyForm('${r.id}')">✎</button>
-        <button class="icon-btn danger" onclick="confirmDelDuty('${r.id}')">✕</button>
+      const title = `${r.person}（${label}）${r.backup?`・代班：${r.backup}`:''}${r.note?`・${r.note}`:''}`;
+      return `<div class="duty-cal-person" title="${esc(title)}" onclick="showDutyForm('${r.id}')">
+        <span class="duty-cal-dot" style="background:${color};"></span>
+        <span class="duty-cal-person-name">${esc(r.person)}</span>
       </div>`;
-    }).join('') || `<p class="text-dim" style="padding:4px 0;font-size:13px;">尚未排班</p>`;
-    rows.push(`<div class="duty-row ${isToday?'today':''} ${isWeekend?'weekend':''}">
-      <div class="duty-date">
-        <span class="mono">${key}</span><span class="text-dim" style="font-size:11px;">週${weekLabel[wd]}${isWeekend?'・假日':''}${isToday?'・今天':''}</span>
+    }).join('');
+    cells.push(`<div class="duty-cal-cell ${isToday?'today':''} ${isWeekend?'weekend':''}">
+      <div class="duty-cal-cell-head">
+        <span class="duty-cal-date-num">${d}${isToday?'<span class="duty-cal-today-tag">今天</span>':''}</span>
+        <button class="duty-cal-add" onclick="showDutyForm(null,'${key}')" title="新增排班">＋</button>
       </div>
-      <div style="flex:1;min-width:0;">${recHtml}</div>
-      <button class="btn ghost" style="flex-shrink:0;" onclick="showDutyForm(null,'${key}')">＋ 排班</button>
+      <div class="duty-cal-people">${peopleHtml}</div>
     </div>`);
   }
+  while (cells.length % 7 !== 0) cells.push(`<div class="duty-cal-cell empty"></div>`); // 補滿最後一週，格狀排版才會整齊
 
   return `
   <h1 class="page-title">📅 值班排班表</h1>
-  <p class="text-dim" style="margin-bottom:16px;">監看CCTV人員排班，含假日加班與請假代班標記。</p>
+  <p class="text-dim" style="margin-bottom:16px;">監看CCTV人員排班，含假日加班與請假代班標記。點日期格裡的人員姓名可編輯/刪除，點「＋」新增當天排班。</p>
   <div class="cal-head" style="justify-content:flex-start;gap:16px;margin-bottom:14px;">
     <button class="icon-btn" onclick="shiftDutyMonth(-1)">◀ 上個月</button>
     <span class="mono">${year} / ${String(month+1).padStart(2,'0')}</span>
@@ -1643,7 +1669,8 @@ function renderDuty() {
     <button class="btn primary" onclick="showDutyForm()">＋ 新增排班</button>
   </div>
   <datalist id="duty-people-list">${people.map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
-  <div class="duty-list">${rows.join('')}</div>`;
+  <div class="duty-cal-weekrow">${weekLabel.map(w=>`<div class="duty-cal-weekday">${w}</div>`).join('')}</div>
+  <div class="duty-cal-grid">${cells.join('')}</div>`;
 }
 function shiftDutyMonth(delta) { const c = state.dutyCursor; state.dutyCursor = new Date(c.getFullYear(), c.getMonth()+delta, 1); render(); }
 function showDutyForm(id, presetDate) {
@@ -1660,7 +1687,7 @@ function showDutyForm(id, presetDate) {
       </select></label>
       <label class="field"><span class="field-label mono">代班人員（請假時填寫）</span><input class="input" id="du-backup" list="duty-people-list" value="${item?esc(item.backup):''}" placeholder="選填"></label>
       <label class="field"><span class="field-label mono">備註</span><input class="input" id="du-note" value="${item?esc(item.note):''}" placeholder="選填"></label>
-      <div class="row-end"><button class="btn primary" id="du-save-btn" onclick="saveDuty(this)">儲存</button></div>
+      <div class="row-end">${item?`<button class="btn danger" onclick="confirmDelDuty('${item.id}')">刪除</button>`:''}<button class="btn primary" id="du-save-btn" onclick="saveDuty(this)">儲存</button></div>
     </div>`);
 }
 async function saveDuty(btn) {
