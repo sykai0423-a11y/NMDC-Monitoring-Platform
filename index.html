@@ -121,6 +121,14 @@ textarea.input { min-height: 70px; resize: vertical; font-family: inherit; }
 .modal-panel.confirm { width: 380px; }
 .maint-entry { background: var(--bg-panel-2); border-radius: 4px; padding: 12px; margin-bottom: 10px; font-size: 13px; }
 .maint-list { display: flex; flex-direction: column; }
+/* 路由器更換表：點開每台設備可展開查看「歷次」更換紀錄 */
+.router-log-row td { background: var(--bg-panel-2); padding: 14px 16px; }
+.router-log-panel { display: flex; flex-direction: column; gap: 10px; }
+.router-log-head { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+.router-log-list { display: flex; flex-direction: column; gap: 6px; }
+.router-log-entry { display: flex; align-items: center; gap: 10px; background: var(--bg-panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; font-size: 13px; }
+.router-log-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 6px; border-top: 1px dashed var(--line); }
+@media (max-width: 700px) { .router-log-add { flex-direction: column; align-items: stretch; } .router-log-add .input { width: 100% !important; } }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px; }
 .photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; cursor: pointer; border: 1px solid var(--line); }
 .lightbox-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
@@ -471,6 +479,12 @@ const SHEET_MAP = {
   router: { sheet: '路由器更換表', idCol: '設備ID',
     toRow: r => ({ '設備ID': r.id||'', '站點': r.site, '設備類型': r.type, '設備編號': r.code, '目前版本': r.cur||'第一版', '更換後版本': r.next||'', '更換日期': r.date||'', '狀態': r.status||'未更換', '備註': r.note||'' }),
     fromRow: s => ({ id: s['設備ID'], site: s['站點'], type: s['設備類型'], code: s['設備編號'], cur: s['目前版本']||'第一版', next: s['更換後版本']||'', date: s['更換日期']||'', status: s['狀態']||'未更換', note: s['備註']||'' }) },
+  // 路由器更換「歷次」紀錄：同一台設備可能前後更換好幾次版本，這張表每一列只記一次更換事件
+  // （用「設備ID」對應回路由器更換表的那一台設備），跟上面 router 的目前版本/狀態欄位是分開的—
+  // router 那幾欄維持「目前最新狀態」用途不變，這裡則是可以展開查看的完整歷史記錄。
+  routerLog: { sheet: '路由器更換紀錄', idCol: '紀錄ID',
+    toRow: r => ({ '紀錄ID': r.id||'', '設備ID': r.equipId, '更換日期': r.date||'', '版本': r.version||'', '備註': r.note||'' }),
+    fromRow: s => ({ id: s['紀錄ID'], equipId: s['設備ID'], date: s['更換日期']||'', version: s['版本']||'', note: s['備註']||'' }) },
   links: { sheet: '附屬網址', idCol: '項目ID',
     toRow: r => ({ '項目ID': r.id||'', '名稱': r.name, '網址': r.url, '建立時間': r.createdAt||new Date().toISOString() }),
     fromRow: s => ({ id: s['項目ID'], name: s['名稱']||'', url: s['網址']||'', createdAt: s['建立時間']||'' }) },
@@ -516,7 +530,7 @@ async function apiSaveMonitorMonthly(month, filename, fileUrl) {
 }
 
 // 全域資料快取：畫面渲染時直接讀這裡（同步），寫入/刪除成功後才重新從雲端拉取該類型資料
-let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [], links: [] };
+let DB = { patrol: [], tomorrow: [], poeChecks: [], poeExtra: [], equipTaichung: [], equipTongxiao: [], monitorFiles: {}, monitorMonthly: {}, poeReservation: [], equipMaint: [], gpsDevices: [], duty: [], router: [], routerLog: [], links: [] };
 
 async function loadAllData() {
   const contentEl = document.getElementById('content');
@@ -524,13 +538,14 @@ async function loadAllData() {
   try {
     // 改成「最多同時 5 個請求」分批讀取（原本是 14 個同時送出，容易讓 Apps Script 卡住、
     // 部分請求永遠沒回應），搭配 apiList 本身的逾時重試，避免網頁卡在讀取畫面不動。
-    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, linkRows] = await runLimited([
+    const [patrolRows, tomorrowRows, poeCheckRows, poeExtraRows, equipTRows, equipXRows, monitorObj, monitorMonthlyObj, poeResRows, equipMaintRows, gpsRows, dutyRows, routerRows, linkRows, routerLogRows] = await runLimited([
       () => apiList('工作日誌'), () => apiList('明日預計工作'), () => apiList('POE抽查日誌'), () => apiList('POE其他需求檔案'),
       () => apiList('台中端設備清單'), () => apiList('通霄端設備清單'), () => apiListMonitor(), () => apiListMonitorMonthly(),
       () => apiList('POE預約抽查'), () => apiList('設備維護紀錄'), () => apiList('GPS機台資料表'),
       () => apiList('監看值班表').catch(() => []), // 若試算表尚未新增「監看值班表」分頁，先以空陣列降級，不中斷其他資料讀取
       () => apiList('路由器更換表').catch(() => []), // 同上，尚未新增「路由器更換表」分頁時先降級成空陣列
       () => apiList('附屬網址').catch(() => []), // 同上，尚未新增「附屬網址」分頁時先降級成空陣列
+      () => apiList('路由器更換紀錄').catch(() => []), // 同上，尚未新增「路由器更換紀錄」分頁時先降級成空陣列
     ], 5);
     DB.patrol = patrolRows.map(SHEET_MAP.patrol.fromRow);
     DB.tomorrow = tomorrowRows.map(SHEET_MAP.tomorrow.fromRow);
@@ -546,6 +561,7 @@ async function loadAllData() {
     DB.duty = dutyRows.map(SHEET_MAP.duty.fromRow);
     DB.router = routerRows.map(SHEET_MAP.router.fromRow);
     DB.links = linkRows.map(SHEET_MAP.links.fromRow).sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    DB.routerLog = routerLogRows.map(SHEET_MAP.routerLog.fromRow);
   } catch (err) {
     contentEl.innerHTML = `<div class="page"><p class="warn-text">雲端資料讀取失敗：${esc(String(err))}</p><button class="btn primary" onclick="loadAllData()">重試</button></div>`;
     return;
@@ -1401,7 +1417,7 @@ function exportToWord(){
 `;
 
 
-let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), monitorSelected: null, monitorDownloadSelected: new Set(), pendingUpload: null, monitorSummaryYear: new Date().getFullYear(), dutyCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), dashboardExpanded: {} };
+let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), monitorSelected: null, monitorDownloadSelected: new Set(), pendingUpload: null, monitorSummaryYear: new Date().getFullYear(), dutyCursor: (()=>{const d=new Date(); d.setDate(1); return d;})(), dashboardExpanded: {}, routerExpanded: {} };
 
 /* ============================= nav ============================= */
 const NAV = [
@@ -2264,7 +2280,10 @@ function renderRouter() {
   </div>`).join('');
 
   const filtered = data.filter(r => (window.__routerFilterSite==='全部' || r.site===window.__routerFilterSite) && (window.__routerFilterStatus==='全部' || r.status===window.__routerFilterStatus));
-  const rows = filtered.map((r, i) => `<tr>
+  const rows = filtered.map((r, i) => {
+    const expanded = !!state.routerExpanded[r.id];
+    const mainRow = `<tr>
+      <td><button class="icon-btn" onclick="toggleRouterExpand('${r.id}')" title="展開／收合更換紀錄">${expanded?'▾':'▸'}</button></td>
       <td class="mono text-dim">${i+1}</td>
       <td><span class="site-tag">${esc(r.site)}</span></td>
       <td>${esc(r.type)}</td>
@@ -2278,11 +2297,34 @@ function renderRouter() {
         <button class="icon-btn" onclick="showRouterForm('${r.id}')">✎</button>
         <button class="icon-btn danger" onclick="confirmDelRouter('${r.id}')">🗑</button>
       </td>
-    </tr>`).join('') || `<tr><td colspan="10" class="text-dim" style="text-align:center;padding:20px;">沒有符合篩選條件的設備</td></tr>`;
+    </tr>`;
+    if (!expanded) return mainRow;
+    // 點開後顯示這台設備「歷次」更換紀錄（同一台可能換過不只一次版本，所以是列表，不是單一欄位）
+    const logs = DB.routerLog.filter(l => l.equipId === r.id).sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+    const logListHtml = logs.map(l => `<div class="router-log-entry">
+        <span class="mono">${esc(l.date)||'—'}</span>
+        <span class="pill" style="background:var(--accent)22;color:var(--accent);border:1px solid var(--accent)66;flex-shrink:0;">${esc(l.version)||'—'}</span>
+        <span class="text-dim" style="flex:1;min-width:0;">${esc(l.note)||''}</span>
+        <button class="icon-btn danger" onclick="delRouterLog('${l.id}','${r.id}')">🗑</button>
+      </div>`).join('') || `<p class="text-dim" style="font-size:13px;margin:0;">尚無更換紀錄，在下方新增第一筆。</p>`;
+    const expandRow = `<tr class="router-log-row"><td colspan="11">
+      <div class="router-log-panel">
+        <div class="router-log-head">📜 ${esc(r.code)} · 更換歷史紀錄（共 ${logs.length} 次）</div>
+        <div class="router-log-list">${logListHtml}</div>
+        <div class="router-log-add">
+          <input class="input" type="date" id="rl-date-${r.id}" value="${todayStr()}" style="width:150px;">
+          <input class="input" id="rl-version-${r.id}" list="router-version-list" placeholder="版本（例如：第三版）" style="width:170px;">
+          <input class="input" id="rl-note-${r.id}" placeholder="備註（選填）" style="flex:1;min-width:140px;">
+          <button class="btn primary" onclick="saveRouterLog('${r.id}')">＋ 新增紀錄</button>
+        </div>
+      </div>
+    </td></tr>`;
+    return mainRow + expandRow;
+  }).join('') || `<tr><td colspan="11" class="text-dim" style="text-align:center;padding:20px;">沒有符合篩選條件的設備</td></tr>`;
 
   return `
   <h1 class="page-title">📡 路由器更換表</h1>
-  <p class="text-dim" style="margin:-12px 0 20px;font-size:13px;line-height:1.6;">目前全數安裝第一版路由器，廠商將陸續提供第二版機台，設備損壞或廠商更換時請於下表登記狀態與日期。</p>
+  <p class="text-dim" style="margin:-12px 0 20px;font-size:13px;line-height:1.6;">目前全數安裝第一版路由器，廠商將陸續提供第二版機台，設備損壞或廠商更換時請於下表登記狀態與日期。點選每列最左邊的箭頭可展開查看該設備「歷次」更換紀錄。</p>
 
   <div class="grid-3">${statCards}</div>
 
@@ -2308,10 +2350,33 @@ function renderRouter() {
       <option ${window.__routerFilterStatus==='已下單待貨'?'selected':''}>已下單待貨</option>
     </select>
   </div>
+  <datalist id="router-version-list"><option value="第一版"><option value="第二版"><option value="第三版"></datalist>
   <div class="table-wrap"><table class="data-table">
-    <thead><tr><th>序號</th><th>站點</th><th>設備類型</th><th>設備編號</th><th>目前版本</th><th>更換後版本</th><th>更換日期</th><th>狀態</th><th>備註</th><th></th></tr></thead>
+    <thead><tr><th></th><th>序號</th><th>站點</th><th>設備類型</th><th>設備編號</th><th>目前版本</th><th>更換後版本</th><th>更換日期</th><th>狀態</th><th>備註</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
+}
+function toggleRouterExpand(id) { state.routerExpanded[id] = !state.routerExpanded[id]; render(); }
+async function saveRouterLog(equipId) {
+  const date = document.getElementById(`rl-date-${equipId}`).value;
+  const version = document.getElementById(`rl-version-${equipId}`).value.trim();
+  const note = document.getElementById(`rl-note-${equipId}`).value.trim();
+  if (!version) { alert('請填寫版本'); return; }
+  try {
+    await apiUpsert(SHEET_MAP.routerLog.sheet, SHEET_MAP.routerLog.toRow({ equipId, date, version, note }));
+    await reloadOne('routerLog');
+  } catch (err) {
+    alert('儲存失敗：' + err + '\n（若是第一次使用，請確認 Google 試算表已新增「路由器更換紀錄」分頁）');
+    return;
+  }
+  state.routerExpanded[equipId] = true;
+  render();
+}
+async function delRouterLog(id, equipId) {
+  try { await apiDelete(SHEET_MAP.routerLog.sheet, id); await reloadOne('routerLog'); }
+  catch (err) { alert('刪除失敗：' + err); return; }
+  state.routerExpanded[equipId] = true;
+  render();
 }
 
 function showRouterForm(id) {
