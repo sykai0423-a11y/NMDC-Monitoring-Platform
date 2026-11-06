@@ -2669,6 +2669,16 @@ function toImageThumb(url, size) {
   if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w${size||300}`;
   return url;
 }
+// Google 的縮圖服務在同時大量請求時容易被限流，造成圖片顯示不出來。
+// 這裡在圖片載入失敗時自動重試一次（延遲後），若仍失敗才放棄顯示，避免整頁圖片一次全部壞掉。
+function handleImgError(img) {
+  const tries = parseInt(img.dataset.retry || '0', 10);
+  if (tries >= 2) { img.style.display = 'none'; return; }
+  img.dataset.retry = String(tries + 1);
+  const base = img.dataset.baseSrc || img.src.split('&_r=')[0];
+  img.dataset.baseSrc = base;
+  setTimeout(() => { img.src = base + '&_r=' + Math.random(); }, 1200 * (tries + 1));
+}
 function showLightbox(url) {
   const div = document.createElement('div');
   div.className = 'lightbox-backdrop';
@@ -2686,7 +2696,7 @@ function showMaintLog(storageKey, site, equipId, equipName) {
         <button class="icon-btn danger" onclick="delMaintRecord('${r.id}','${storageKey}','${site}','${equipId}','${esc(equipName)}')">🗑</button>
       </div>
       <p style="margin:0 0 8px;">${esc(r.note)||'（無說明）'}</p>
-      ${(r.photos||[]).length ? `<div class="photo-grid">${r.photos.map(p=>`<img src="${toImageThumb(p)}" onclick="showLightbox('${p}')" />`).join('')}</div>` : ''}
+      ${(r.photos||[]).length ? `<div class="photo-grid">${r.photos.map(p=>`<img src="${toImageThumb(p)}" loading="lazy" decoding="async" onerror="handleImgError(this)" onclick="showLightbox('${p}')" />`).join('')}</div>` : ''}
     </div>`).join('') || `<p class="text-dim">尚無維護紀錄</p>`;
 
   openModal(`維護紀錄 · ${equipName}`, `
@@ -2818,7 +2828,7 @@ function renderGps() {
   const cards = items.map(d => `
     <div class="viewfinder card"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
       <div class="card-head"><span class="mono">${esc(d.num)||'（無編號）'}</span>${siteTag(d.site)}</div>
-      ${d.photo ? `<img src="${toImageThumb(d.photo, 400)}" onclick="showLightbox('${d.photo}')" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:4px;margin-bottom:8px;cursor:pointer;border:1px solid var(--line);">` : ''}
+      ${d.photo ? `<img src="${toImageThumb(d.photo, 400)}" loading="lazy" decoding="async" onerror="handleImgError(this)" onclick="showLightbox('${d.photo}')" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:4px;margin-bottom:8px;cursor:pointer;border:1px solid var(--line);">` : ''}
       <div class="text-dim" style="font-size:13px;line-height:1.7;">
         <div>品名：${esc(d.name)||'—'}</div><div>型號：${esc(d.model)||'—'}</div>
         <div>IMEI：<span class="mono">${esc(d.imei)||'—'}</span></div>
