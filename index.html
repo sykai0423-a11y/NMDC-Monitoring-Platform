@@ -3861,5 +3861,65 @@ window.FloorMode = { setMode, state: S, floors };
 })();
 </script>
 
+<!-- ============================= 左側選單：隱藏式 =============================
+  ▸ 左上角 ☰ 按鈕：切換「隱藏／固定顯示」，會記住上次的設定（預設隱藏）
+  ▸ 隱藏時：滑鼠移到畫面最左邊，選單會自動滑出；滑鼠離開或點選頁面後自動收起
+  ▸ 原版模式、樓層模式都適用
+================================================================================== -->
+<style id="sb-style">
+.sb-title-wrap { display: flex; align-items: center; gap: 10px; }
+#sb-toggle { font-size: 18px; line-height: 1; padding: 4px 8px; }
+body.sb-hidden .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-100%); transition: transform .22s ease, box-shadow .22s; overflow-y: auto; }
+body.sb-hidden.sb-peek .sidebar { transform: none; box-shadow: 6px 0 24px rgba(30,34,53,.16); }
+#sb-edge { position: fixed; left: 0; top: 0; bottom: 0; width: 12px; z-index: 59; display: none; }
+body.sb-hidden #sb-edge { display: block; }
+#sb-pin { margin: -12px 6px 0; font-size: 12px; }
+body:not(.sb-hidden) #sb-pin { display: none; }
+</style>
+<script>
+(function () {
+  const KEY = 'cctv-sidebar-hidden';
+  const get = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
+  const set = v => { try { localStorage.setItem(KEY, v); } catch (e) {} };
+  const sidebar = document.querySelector('.sidebar'), title = document.getElementById('topbarTitle');
+
+  // 左上角 ☰ 按鈕（放在頁面標題左邊）
+  const wrap = document.createElement('div'); wrap.className = 'sb-title-wrap';
+  title.parentNode.insertBefore(wrap, title);
+  const btn = document.createElement('button'); btn.id = 'sb-toggle'; btn.className = 'icon-btn';
+  btn.textContent = '☰'; wrap.appendChild(btn); wrap.appendChild(title);
+
+  // 滑出時，選單上方的「固定顯示」按鈕
+  const pin = document.createElement('button'); pin.id = 'sb-pin'; pin.className = 'btn small ghost'; pin.textContent = '📌 固定顯示選單';
+  sidebar.insertBefore(pin, sidebar.children[1] || null);
+
+  // 左邊緣感應區
+  const edge = document.createElement('div'); edge.id = 'sb-edge'; document.body.appendChild(edge);
+
+  let timer = null;
+  const peek = on => { clearTimeout(timer); document.body.classList.toggle('sb-peek', on); };
+  function apply(hidden) {
+    document.body.classList.toggle('sb-hidden', hidden); peek(false); set(hidden ? '1' : '0');
+    btn.title = hidden ? '顯示選單（或把滑鼠移到畫面最左邊）' : '隱藏選單';
+  }
+  btn.onclick = () => {
+    const hidden = document.body.classList.contains('sb-hidden');
+    if (hidden && !document.body.classList.contains('sb-peek')) peek(true);   // 隱藏中：先滑出
+    else if (hidden) peek(false);
+    else apply(true);
+  };
+  pin.onclick = () => apply(false);
+  edge.addEventListener('mouseenter', () => peek(true));
+  sidebar.addEventListener('mouseenter', () => clearTimeout(timer));
+  sidebar.addEventListener('mouseleave', () => { if (document.body.classList.contains('sb-hidden')) timer = setTimeout(() => peek(false), 350); });
+  // 點了選單中的頁面後自動收起
+  sidebar.addEventListener('click', e => { if (e.target.closest('.nav-item') && document.body.classList.contains('sb-hidden')) setTimeout(() => peek(false), 150); });
+
+  document.addEventListener('click', e => { if (document.body.classList.contains('sb-peek') && !sidebar.contains(e.target) && !btn.contains(e.target)) peek(false); });
+
+  apply(get() !== '0');   // 預設隱藏
+})();
+</script>
+
 </body>
 </html>
