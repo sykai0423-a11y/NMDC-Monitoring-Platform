@@ -1421,21 +1421,23 @@ let state = { page: 'dashboard', monitorCursor: (()=>{const d=new Date(); d.setD
 
 /* ============================= nav ============================= */
 const NAV = [
-  { key: 'dashboard', label: '首頁儀表板' },
-  { key: 'duty', label: '值班排班表' },
-  { key: 'worklog', label: '工作日誌' },
-  { key: 'monitor', label: '監看紀錄表' },
-  { key: 'monitorSummary', label: '監看紀錄表月彙總' },
-  { key: 'poe', label: 'POE抽查日誌' },
-  { key: 'router', label: '路由器更換表' },
-  { key: 'taichung', label: '台中端' },
-  { key: 'tongxiao', label: '通霄端' },
-  { key: 'gps', label: 'GPS機台資料表' },
-  { key: 'worktasks', label: '工作事項分類表' },
+  // floor：樓層模式（3D 大樓）用的設定，原版模式不會用到。不填也可以，會自動排到主樓最上層。
+  //   wing:'annex' 附屬館 · basement:true 地下室 · site:'台中端'/'通霄端' · theme: 擺設（說明見檔案最下方「樓層模式」區塊）
+  { key: 'dashboard', label: '首頁儀表板', floor: { theme: 'lobby' } },
+  { key: 'duty', label: '值班排班表', floor: { theme: 'duty' } },
+  { key: 'worklog', label: '工作日誌', floor: { theme: 'desks' } },
+  { key: 'monitor', label: '監看紀錄表', floor: { theme: 'monitors' } },
+  { key: 'monitorSummary', label: '監看紀錄表月彙總', floor: { basement: true, theme: 'files' } },
+  { key: 'poe', label: 'POE抽查日誌', floor: { theme: 'meet' } },
+  { key: 'router', label: '路由器更換表', floor: { theme: 'racks' } },
+  { key: 'taichung', label: '台中端', floor: { site: '台中端', theme: 'site' } },
+  { key: 'tongxiao', label: '通霄端', floor: { site: '通霄端', theme: 'site' } },
+  { key: 'gps', label: 'GPS機台資料表', floor: { theme: 'gps' } },
+  { key: 'worktasks', label: '工作事項分類表', floor: { theme: 'board' } },
   // 外部系統：改成右側內嵌顯示，不跳新分頁，所以用 key（跟其他頁面一樣）。
-  { key: 'airTaichung', label: '空氣站資訊（台中）' },
-  { key: 'airTongxiao', label: '空氣站資訊（通霄）' },
-  { key: 'links', label: '附屬網址' },
+  { key: 'airTaichung', label: '空氣站資訊（台中）', floor: { wing: 'annex', site: '台中端', theme: 'weather' } },
+  { key: 'airTongxiao', label: '空氣站資訊（通霄）', floor: { wing: 'annex', site: '通霄端', theme: 'weather' } },
+  { key: 'links', label: '附屬網址', floor: { wing: 'annex', theme: 'linkboard' } },
 ];
 
 function renderNav() {
@@ -3221,5 +3223,643 @@ async function importExcel(event) {
 tickClock();
 loadAllData();
 </script>
+
+<!-- ============================= 樓層模式（3D 百貨大樓）=============================
+  這一整段是「樓層模式」外掛，原本平台的功能都沒有改動，只是：
+  1. 讀取上面的 NAV 清單，自動產生大樓樓層（NAV 每多一頁，大樓就多一層）
+  2. 點樓層／點左側選單時，播放電梯動畫後呼叫原本的 goPage() 換頁
+  3. 狀態燈直接讀取已經載入的 DB 資料，不會額外呼叫 Apps Script
+
+  ▸ 新增頁面時想指定樓層位置或擺設，在 NAV 那一行加 floor 設定即可，例如：
+      { key: 'newPage', label: '新頁面', floor: { wing: 'annex', site: '通霄端', theme: 'monitors' } }
+    wing     : 不填＝主樓（往上加一層）；'annex'＝附屬館
+    basement : true＝放在地下室（B1、B2…）
+    site     : '台中端' / '通霄端' / 不填＝共用
+    theme    : 樓層擺設，可選：
+               lobby 大廳服務台 · duty 排班看板 · desks 辦公桌 · monitors 監視器牆
+               files 檔案櫃 · meet 會議桌 · racks 網路機櫃 · site 工區模型
+               gps 定位地圖 · board 分類白板 · weather 氣象站 · linkboard 連結看板
+               （不填＝desks 辦公桌）
+  ▸ 想讓新頁面也有狀態燈，在下面 FLOOR_STATUS 加一個同 key 的函式即可（不加就顯示「—」）。
+================================================================================== -->
+<style id="fm-style">
+.main { position: relative; }
+#fm-stage { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; display: none; background: #E6F1FB; overflow: hidden; transition: background .6s; }
+#fm-stage.night { background: #0B1E3A; }
+#fm-stage canvas { display: block; }
+.fm-hud { position: absolute; z-index: 3; font-size: 12px; }
+#fm-rec { top: 12px; left: 14px; color: #0C447C; pointer-events: none; font-family: monospace; }
+#fm-stage.night #fm-rec { color: #E6F1FB; }
+#fm-loading { inset: 0; display: flex; align-items: center; justify-content: center; color: #185FA5; font-size: 14px; }
+#fm-alarms { left: 12px; bottom: 12px; background: #fff; border: 1px solid #B5D4F4; border-radius: 8px; padding: 8px 10px; color: #0C447C; min-width: 230px; max-width: 360px; max-height: 40%; overflow: auto; }
+.fm-al-head { font-weight: 600; margin-bottom: 4px; }
+.fm-al-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
+.fm-al-row:hover { color: var(--accent); }
+.fm-al-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+#fm-hint { right: 12px; bottom: 12px; color: #185FA5; background: #fff; padding: 3px 8px; border-radius: 6px; pointer-events: none; }
+#fm-card { position: absolute; z-index: 4; pointer-events: none; width: 240px; background: #fff; border: 1px solid #85B7EB; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: #0C447C; opacity: 0; transition: opacity .15s; box-shadow: 0 6px 18px rgba(12,68,124,.12); }
+.fm-card-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+.fm-card-chips { display: flex; gap: 4px; margin-bottom: 8px; }
+.fm-chip { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: #E6F1FB; }
+.fm-card-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; color: #185FA5; }
+.fm-card-grid b { color: #0C447C; font-weight: 600; text-align: right; }
+.fm-card-msg { margin-top: 8px; font-weight: 600; }
+#fm-doors { position: absolute; left: 0; right: 0; bottom: 0; z-index: 40; pointer-events: none; display: none; overflow: hidden; }
+.fm-door { position: absolute; top: 0; bottom: 0; width: 50%; background: #B5D4F4; transition: transform .35s ease; }
+.fm-door.l { left: 0; transform: translateX(-100%); border-right: 1px solid #378ADD; }
+.fm-door.r { right: 0; transform: translateX(100%); border-left: 1px solid #378ADD; }
+#fm-doors.closed .fm-door { transform: translateX(0); }
+#fm-counter { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #0C447C; opacity: 0; transition: opacity .15s; }
+#fm-counter .a { font-size: 22px; }
+#fm-counter .t { font-size: 46px; font-weight: 700; font-family: monospace; }
+#fm-counter .n { font-size: 14px; margin-top: 4px; }
+#fm-ctl { display: flex; gap: 6px; align-items: center; }
+#fm-ctl .btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.fm-code { display: inline-block; min-width: 30px; font-family: monospace; font-size: 11px; color: #185FA5; background: #E6F1FB; border-radius: 4px; padding: 1px 4px; text-align: center; flex-shrink: 0; }
+.nav-item.active .fm-code { background: var(--accent); color: #fff; }
+.fm-ndot { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; flex-shrink: 0; }
+.fm-nav-sep { font-size: 11px; color: var(--text-dim); padding: 8px 12px 2px; }
+body.fm-on .nav-item { gap: 8px; }
+body.fm-on { height: 100vh; overflow: hidden; }
+body.fm-on .sidebar { overflow-y: auto; }
+body.fm-on .main { height: 100vh; }
+#content.fm-zoom { position: relative; z-index: 30; background: var(--bg-void); transform-origin: 0 0; }
+</style>
+<script>
+(function () {
+'use strict';
+/* ---------- 各樓層狀態燈：讀取 DB 計算（st: ok 正常 / warn 待處理 / alarm 異常 / none 無監測項目）---------- */
+function patrolDone(site) { const t = todayStr(); return DB.patrol.some(p => p.date === t && p.site === site); }
+function planCounts(site) { const c = { done: 0, pending: 0, incomplete: 0 }; DB.tomorrow.filter(p => !site || p.site === site).forEach(p => c[p.status] = (c[p.status] || 0) + 1); return c; }
+function missingMonitor() { const m = []; for (let i = 1; i <= 7; i++) { const d = new Date(); d.setDate(d.getDate() - i); const ds = d.toISOString().slice(0, 10); if (!DB.monitorFiles[ds]) m.push(ds); } return m; }
+function equipStatus(list, site) {
+  const ab = list.filter(e => e.status === 'abnormal').length, mt = list.filter(e => e.status === 'maintenance').length, pd = patrolDone(site);
+  return { st: ab ? 'alarm' : (mt || !pd) ? 'warn' : 'ok',
+    msg: ab ? `${ab} 項設備異常` : mt ? `${mt} 項設備維修中` : !pd ? '今日尚未巡檢' : '',
+    rows: [['設備總數', list.length], ['異常', ab], ['維修中', mt], ['今日巡檢', pd ? '已完成' : '尚未巡檢']] };
+}
+const FLOOR_STATUS = {
+  dashboard() {
+    const nd = ['台中端', '通霄端'].filter(s => !patrolDone(s)), c = planCounts();
+    return { st: nd.length ? 'warn' : 'ok', msg: nd.length ? nd.join('、') + ' 今日尚未巡檢' : '',
+      rows: [['今日巡檢', (2 - nd.length) + ' / 2 端'], ['明日工作待辦', c.pending || 0], ['明日工作未完成', c.incomplete || 0]] };
+  },
+  duty() {
+    const t = todayStr(), names = DB.duty.filter(x => x.date === t).map(x => x.person);
+    let un = 0; if (typeof thisWeekMonday === 'function') weekDatesFrom(thisWeekMonday()).forEach(ds => { if (ds >= t && !DB.duty.some(x => x.date === ds)) un++; });
+    return { st: names.length ? 'ok' : 'warn', msg: names.length ? '' : '今日尚未排班',
+      rows: [['今日值班', names.join('、') || '未排班'], ['本週未排班', un + ' 天']] };
+  },
+  worklog() {
+    const t = todayStr(), n = DB.patrol.filter(p => p.date === t).length, c = planCounts();
+    return { st: c.incomplete ? 'warn' : 'ok', msg: c.incomplete ? `${c.incomplete} 項明日工作未完成` : '',
+      rows: [['今日巡檢紀錄', n + ' 筆'], ['待辦', c.pending || 0], ['未完成', c.incomplete || 0]] };
+  },
+  monitor() {
+    const m = missingMonitor(), ym = todayStr().slice(0, 7), keys = Object.keys(DB.monitorFiles).sort();
+    return { st: m.length ? 'alarm' : 'ok', msg: m.length ? `近 7 日缺 ${m.length} 份紀錄` : '',
+      rows: [['近 7 日缺件', m.length + ' 份'], ['本月已上傳', keys.filter(k => k.startsWith(ym)).length + ' 份'], ['最近上傳', keys.length ? keys[keys.length - 1].slice(5) : '—']] };
+  },
+  monitorSummary() {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    const pm = d.toISOString().slice(0, 7), has = !!(DB.monitorMonthly[pm] || []).length, y = String(new Date().getFullYear());
+    return { st: has ? 'ok' : 'warn', msg: has ? '' : `上月（${pm}）月彙總未上傳`,
+      rows: [['今年已上傳', Object.keys(DB.monitorMonthly).filter(k => k.startsWith(y)).length + ' 個月'], ['上月月彙總', has ? '已上傳' : '未上傳']] };
+  },
+  poe() {
+    const pi = DB.poeChecks.filter(p => p.improveStatus && p.improveStatus !== '已完成').length, r = { pending: 0, incomplete: 0 };
+    DB.poeReservation.forEach(x => r[x.status] = (r[x.status] || 0) + 1);
+    return { st: (pi || r.incomplete) ? 'warn' : 'ok', msg: pi ? `缺失待改善 ${pi} 筆` : r.incomplete ? `預約未完成 ${r.incomplete} 筆` : '',
+      rows: [['抽查紀錄', DB.poeChecks.length + ' 筆'], ['缺失待改善', pi], ['預約待辦', r.pending || 0], ['預約未完成', r.incomplete || 0]] };
+  },
+  router() {
+    const d = DB.router, ok = d.filter(r => r.status === '已更換').length, no = d.filter(r => r.status === '未更換').length, bad = d.filter(r => r.status === '損壞待換').length;
+    return { st: bad ? 'alarm' : 'ok', msg: bad ? `${bad} 台損壞待換` : '',
+      rows: [['已更換', ok + ' / ' + d.length], ['未更換', no], ['損壞待換', bad]] };
+  },
+  taichung() { return equipStatus(DB.equipTaichung, '台中端'); },
+  tongxiao() { return equipStatus(DB.equipTongxiao, '通霄端'); },
+  gps() {
+    const a = DB.gpsDevices;
+    return { st: 'none', rows: [['機台總數', a.length], ['台中端', a.filter(x => x.site === '台中端').length], ['通霄端', a.filter(x => x.site === '通霄端').length]] };
+  },
+  worktasks() { return { st: 'none', rows: [['資料', '獨立模組']] }; },
+  airTaichung() { return { st: 'none', rows: [['來源', '外部系統內嵌']] }; },
+  airTongxiao() { return { st: 'none', rows: [['來源', '外部系統內嵌']] }; },
+  links() { return { st: 'none', rows: [['網址數', DB.links.length]] }; },
+};
+
+/* ---------- 基本設定 ---------- */
+const THREE_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+const ORBIT_SRC = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js';
+const L = 1.6;
+const SC = { ok: '#10B981', warn: '#FFB020', alarm: '#FF5A5F', none: '#85B7EB', load: '#B4B2A9' };
+const SN = { ok: '正常', warn: '待處理', alarm: '異常', none: '—', load: '讀取中' };
+const PC = [0xD4537E, 0x7F77DD, 0x1D9E75, 0xEF9F27, 0x378ADD, 0xD85A30, 0x5DCAA5, 0xAFA9EC];
+const OFF = [.5, -.4, .6, -.5, .3, -.3, .45, -.35, .25, -.45];
+const LS = { get(k, d) { try { const v = localStorage.getItem('fm-' + k); return v == null ? d : v; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('fm-' + k, v); } catch (e) {} } };
+const $ = id => document.getElementById(id), wait = ms => new Promise(r => setTimeout(r, ms));
+const S = { on: false, built: false, inPage: false, busy: false, cur: null, dataReady: false, visible: false, raf: 0,
+  quick: LS.get('quick', '0') === '1', sound: LS.get('sound', '0') === '1', nightMode: LS.get('night', 'auto'), night: false };
+
+/* ---------- 注入畫面元素（舞台、電梯門、上方按鈕）---------- */
+const mainEl = document.querySelector('.main'), contentEl = $('content'), topbar = document.querySelector('.topbar');
+const stage = document.createElement('div'); stage.id = 'fm-stage';
+stage.innerHTML = `<div id="fm-rec" class="fm-hud"><span style="color:#FF5A5F">●</span> REC　NMDC 監控大樓</div>
+  <div id="fm-loading" class="fm-hud">載入 3D 大樓中…</div>
+  <div id="fm-alarms" class="fm-hud"></div>
+  <div id="fm-hint" class="fm-hud">拖曳旋轉 · 滾輪縮放 · 點樓層進入</div>
+  <div id="fm-card"></div><div id="fm-cv" style="position:absolute;inset:0"></div>`;
+mainEl.appendChild(stage);
+const doors = document.createElement('div'); doors.id = 'fm-doors';
+doors.innerHTML = `<div class="fm-door l"></div><div class="fm-door r"></div><div id="fm-counter"><div class="a" id="fm-ca"></div><div class="t" id="fm-ct"></div><div class="n" id="fm-cn"></div></div>`;
+mainEl.appendChild(doors);
+const ctl = document.createElement('div'); ctl.id = 'fm-ctl';
+ctl.innerHTML = `<button class="btn small ghost" id="fm-b-home">🏢 大樓總覽</button><button class="btn small ghost" id="fm-b-night"></button><button class="btn small ghost" id="fm-b-quick" title="跳過動畫直接換頁">⚡ 快速模式</button><button class="btn small ghost" id="fm-b-snd"></button><button class="btn small ghost" id="fm-b-mode" title="切換樓層模式／原版模式">🏬 樓層模式</button>`;
+topbar.lastElementChild.insertBefore(ctl, topbar.lastElementChild.firstChild);
+
+function layout() {
+  const t = topbar.offsetHeight + 'px'; stage.style.top = t; doors.style.top = t;
+  if (S.built) { const w = stage.clientWidth, h = stage.clientHeight; if (w && h) { cam.aspect = w / h; cam.updateProjectionMatrix(); ren.setSize(w, h); } }
+}
+new ResizeObserver(layout).observe(mainEl);
+
+function updateCtl() {
+  $('fm-b-mode').classList.toggle('on', S.on);
+  ['fm-b-night', 'fm-b-quick', 'fm-b-snd'].forEach(id => $(id).style.display = S.on ? '' : 'none');
+  $('fm-b-home').style.display = S.on && S.inPage ? '' : 'none';
+  $('fm-b-night').textContent = { auto: '🌗 日夜自動', day: '☀️ 日間', night: '🌙 夜間' }[S.nightMode];
+  $('fm-b-quick').classList.toggle('on', S.quick);
+  $('fm-b-snd').textContent = S.sound ? '🔊 音效' : '🔇 音效';
+  const tt = $('topbarTitle');
+  if (tt) { if (S.on && !S.inPage) tt.textContent = 'NMDC 監控大樓 · 總覽'; else { const n = NAV.find(x => x.key === state.page); if (n) tt.textContent = n.label; } }
+}
+
+/* ---------- 3D 場景 ---------- */
+let T, scene, cam, ren, orbit, hemi, sun, clock, grassM, HOME, HT, G = 0;
+const floors = [], byKey = {}, elevs = [], anims = [], mats = {};
+const camT = { p: null, t: null }; let follow = null, hov = null, last = 0;
+
+function mat(c) { return mats[c] || (mats[c] = new T.MeshLambertMaterial({ color: c })); }
+function V(x, y, z) { return new T.Vector3(x, y, z); }
+function box(p, w, h, d, c, x, y, z) { const m = new T.Mesh(new T.BoxGeometry(w, h, d), typeof c === 'number' ? mat(c) : c); m.position.set(x, y + h / 2, z); m.castShadow = m.receiveShadow = true; p.add(m); return m; }
+function person(p, x, z, c, sit, ry) {
+  const g = new T.Group(); g.position.set(x, 0, z); g.rotation.y = ry || 0; g.userData = { person: 1, r0: ry || 0, ty: ry || 0 };
+  const by = sit ? .42 : .33;
+  const b = new T.Mesh(new T.CylinderGeometry(.11, .13, .42, 8), mat(c)); b.position.y = by; b.castShadow = true;
+  const h = new T.Mesh(new T.SphereGeometry(.11, 10, 8), mat(0xF5C4B3)); h.position.y = by + .32;
+  const hr = new T.Mesh(new T.SphereGeometry(.115, 10, 8, 0, 6.3, 0, 1.3), mat(0x2C2C2A)); hr.position.y = by + .34;
+  g.add(b, h, hr);
+  [-.04, .04].forEach(ex => { const e = new T.Mesh(new T.SphereGeometry(.018, 6, 6), mat(0x2C2C2A)); e.position.set(ex, by + .33, .1); g.add(e); });
+  p.add(g); return g;
+}
+function desk(p, x, z, c) { box(p, .7, .05, .42, 0xD3B48C, x, .36, z); box(p, .32, .22, .03, 0x444441, x, .41, z - .12); box(p, .28, .17, .01, 0x85B7EB, x, .44, z - .104); return person(p, x, z + .32, c, 1, Math.PI); }
+function plant(p, x, z) { box(p, .3, .3, .3, 0xD3D1C7, x, .12, z); const l = new T.Mesh(new T.IcosahedronGeometry(.28, 0), mat(0x639922)); l.position.set(x, .7, z); l.castShadow = true; p.add(l); }
+function textSprite(text, color, bg, sw) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
+  const s = new T.Sprite(new T.SpriteMaterial({ map: new T.CanvasTexture(c), transparent: true, depthTest: false }));
+  s.scale.set(sw || 1.2, (sw || 1.2) / 4, 1); s.renderOrder = 9;
+  s.userData.set = (t) => { x.clearRect(0, 0, 256, 64); if (!t) { s.visible = false; return; } s.visible = true; if (bg) { x.fillStyle = bg; x.fillRect(0, 6, 256, 52); } x.fillStyle = color; x.font = '600 34px sans-serif'; x.textAlign = 'center'; x.fillText(t, 128, 44); s.material.map.needsUpdate = true; };
+  s.userData.set(text); return s;
+}
+function blinkLeds(g, x, z, n) { for (let k = 0; k < n; k++) { const m = new T.Mesh(new T.BoxGeometry(.05, .04, .02), new T.MeshBasicMaterial({ color: k % 3 ? 0x5DCAA5 : 0xEF9F27 })); m.position.set(x, .32 + k * .16, z); g.add(m); const ph = Math.random() * 6; anims.push(t => m.visible = Math.sin(t * (2 + k) + ph) > -.4); } }
+
+/* 樓層擺設（右側牆面留給螢幕，擺設都放在左半邊） */
+const THEMES = {
+  lobby(g, w, d) {
+    box(g, 2, .55, .5, 0xF1EFE8, -1.2, .12, -1.4); box(g, 2, .06, .6, 0x378ADD, -1.2, .67, -1.4);
+    person(g, -1.6, -1.8, PC[1], 0, 0); person(g, -.8, -1.8, PC[3], 0, 0);
+    for (let i = 0; i < 4; i++) { const p = person(g, 0, 0, PC[i + 4]); p.userData.walker = 1; const ph = i * 1.6, r = 1.1 + i * .26; anims.push(t => { const a = t * .4 + ph; p.position.set(-1 + Math.cos(a) * r * 1.25, 0, .9 + Math.sin(a) * r * .42); p.rotation.y = -a; p.children[0].position.y = .33 + Math.abs(Math.sin(t * 6 + i)) * .03; }); }
+    plant(g, -w / 2 + .5, d / 2 - .5); plant(g, -w / 2 + .5, -d / 2 + .5);
+  },
+  duty(g, w, d, f) {
+    box(g, 3, 1, .06, 0xFFFFFF, -1.5, .35, -d / 2 + .15);
+    for (let i = 0; i < 7; i++) for (let j = 0; j < 3; j++) box(g, .3, .18, .02, [0x378ADD, 0x85B7EB, 0xEF9F27][(i + j) % 3], -2.75 + i * .42, .5 + j * .26, -d / 2 + .19);
+    person(g, -2.2, .3, PC[4]); person(g, -1, .3, PC[0]);
+    f.tags = [textSprite('', '#0C447C', 'rgba(255,255,255,.9)'), textSprite('', '#0C447C', 'rgba(255,255,255,.9)')];
+    f.tags[0].position.set(-2.2, 1.05, .3); f.tags[1].position.set(-1, 1.05, .3); g.add(f.tags[0], f.tags[1]);
+    desk(g, -3, 1.4, PC[6]);
+  },
+  desks(g) { for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) desk(g, -3.1 + i * 1.4, -.5 + j * 1.3, PC[(i + j * 3) % 8]); },
+  monitors(g, w, d) {
+    const scr = [];
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) { const m = new T.Mesh(new T.BoxGeometry(.8, .48, .04), new T.MeshBasicMaterial({ color: 0x378ADD })); m.position.set(-3 + i * .84, .55 + j * .52, -d / 2 + .15); g.add(m); scr.push(m); }
+    anims.push(() => { if (Math.random() < .05) scr[Math.random() * 8 | 0].material.color.set([0x378ADD, 0x185FA5, 0x85B7EB, 0x5DCAA5][Math.random() * 4 | 0]); });
+    box(g, 3.4, .4, .6, 0xF1EFE8, -1.8, .12, -.7); for (let i = 0; i < 3; i++) person(g, -2.9 + i * 1.1, -.1, PC[i + 2], 1, Math.PI);
+    desk(g, -3, 1.5, PC[0]);
+  },
+  files(g) { for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) box(g, .9, 1.1, .4, 0x888780, -3.2 + i * 1.2, .12, -1.4 + j * 1.5); person(g, -1.2, 1.5, PC[2]); person(g, -3, 1.6, PC[4]); },
+  meet(g, w, d) {
+    box(g, 3, .06, 1.1, 0xD3B48C, -1.4, .42, 0);
+    for (let i = 0; i < 4; i++) { person(g, -2.6 + i * .8, .85, PC[i], 1, Math.PI); person(g, -2.6 + i * .8, -.85, PC[i + 4], 1, 0); }
+    box(g, 1.6, .9, .05, 0xF1EFE8, -1.4, .6, -d / 2 + .15);
+  },
+  racks(g) { for (let i = 0; i < 4; i++) { const x = -3.3 + i * 1; box(g, .7, 1.25, .6, 0x2C2C2A, x, .12, -1.6); blinkLeds(g, x - .2, -1.29, 6); blinkLeds(g, x + .1, -1.29, 6); } person(g, -1.6, .6, PC[5]); box(g, .9, .5, .5, 0xF1EFE8, -3, .12, 1.2); },
+  site(g, w, d, f) {
+    const col = f.site === '通霄端' ? 0xEF9F27 : 0x378ADD;
+    box(g, 4.2, .06, 2.8, 0xC0DD97, -1.6, .12, .1);
+    [[0xD85A30, -3, -.6], [0x185FA5, -2.2, -.6], [0xEF9F27, -3, .5], [0x1D9E75, -1.2, .6], [0x888780, -.6, -.5]].forEach(c => box(g, .7, .32, .32, c[0], c[1], .18, c[2]));
+    [[-3.5, 1.3], [-.2, 1.3]].forEach(([x, z]) => { box(g, .06, 1.1, .06, 0x5F5E5A, x, .18, z); const ca = box(g, .22, .13, .13, 0x2C2C2A, x, 1.25, z + .08); anims.push(t => ca.rotation.y = Math.sin(t * .7 + x) * 1.1); });
+    box(g, 1.6, .4, .06, col, -1.6, .9, -d / 2 + .2);
+    const s = textSprite(f.site, '#FFFFFF', null, 1.4); s.position.set(-1.6, 1.1, -d / 2 + .3); g.add(s);
+    person(g, -1.8, 1.7, PC[3]);
+  },
+  gps(g, w, d) {
+    box(g, 3.2, 1.1, .06, 0x042C53, -1.8, .3, -d / 2 + .15);
+    for (let i = 0; i < 12; i++) { const s = new T.Mesh(new T.SphereGeometry(.05, 6, 6), new T.MeshBasicMaterial({ color: 0x97C459 })); s.position.set(-3.2 + Math.random() * 2.8, .45 + Math.random() * .85, -d / 2 + .2); g.add(s); const ph = Math.random() * 6; anims.push(t => s.visible = Math.sin(t * 3 + ph) > -.3); }
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) desk(g, -3.1 + i * 1.4, .1 + j * 1.2, PC[(i + j * 4) % 8]);
+  },
+  board(g, w, d) {
+    box(g, 3.2, 1, .06, 0xFFFFFF, -1.6, .35, -d / 2 + .15);
+    for (let c = 0; c < 4; c++) for (let k = 0; k < 3; k++) box(g, .3, .22, .02, [0xFAC775, 0x9FE1CB, 0xF4C0D1, 0xB5D4F4][c], -2.8 + c * .8, .5 + k * .28, -d / 2 + .19);
+    box(g, 1.6, .06, .8, 0xD3B48C, -1.6, .42, .6); person(g, -2.2, 1.2, PC[1], 1, Math.PI); person(g, -1, 1.2, PC[6], 1, Math.PI); person(g, -1.6, -.4, PC[2]);
+  },
+  weather(g, w, d, f) {
+    box(g, .06, 1.15, .06, 0x5F5E5A, -1.8, .12, -.6);
+    const cups = new T.Group(); cups.position.set(-1.8, 1.3, -.6); g.add(cups);
+    for (let i = 0; i < 3; i++) { const a = i * 2.094; const arm = new T.Mesh(new T.BoxGeometry(.32, .02, .02), mat(0x5F5E5A)); arm.position.set(Math.cos(a) * .16, 0, Math.sin(a) * .16); arm.rotation.y = -a; cups.add(arm); const cp = new T.Mesh(new T.SphereGeometry(.05, 8, 6), mat(0xFFFFFF)); cp.position.set(Math.cos(a) * .32, 0, Math.sin(a) * .32); cups.add(cp); }
+    anims.push(t => cups.rotation.y = t * 3);
+    box(g, .3, .25, .2, 0xF1EFE8, -1.8, .6, -.48);
+    box(g, 1.2, .7, .05, 0x042C53, -1.2, .45, -d / 2 + .15);
+    const s = textSprite(f.site === '共用' ? '空氣站' : f.site, '#FFFFFF', f.site === '通霄端' ? '#EF9F27' : '#378ADD', 1.2); s.position.set(-1.2, 1.35, -d / 2 + .3); g.add(s);
+    person(g, -1, .8, PC[4]);
+  },
+  linkboard(g, w, d) {
+    box(g, 2.2, .9, .06, 0xFFFFFF, -1.5, .4, -d / 2 + .15);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) box(g, .55, .3, .02, 0xB5D4F4, -2.2 + i * .7, .52 + j * .38, -d / 2 + .19);
+    const gl = new T.Mesh(new T.SphereGeometry(.38, 14, 10), new T.MeshBasicMaterial({ color: 0x378ADD, wireframe: true })); gl.position.set(-1.6, .9, .7); g.add(gl); box(g, .1, .5, .1, 0x5F5E5A, -1.6, .12, .7);
+    anims.push(t => gl.rotation.y = t * .8); person(g, -.8, 1.2, PC[0]);
+  },
+};
+
+function makeElev(x, z, baseY, n, codes, lv0) {
+  const g = new T.Group(); g.position.set(x, 0, z); scene.add(g);
+  const gm = new T.MeshLambertMaterial({ color: 0xCFE6FA, transparent: true, opacity: .12, depthWrite: false, side: T.DoubleSide });
+  const sh = new T.Mesh(new T.BoxGeometry(1.3, n * L, 1.3), gm); sh.position.y = baseY + n * L / 2; g.add(sh);
+  const se = new T.LineSegments(new T.EdgesGeometry(sh.geometry), new T.LineBasicMaterial({ color: 0x185FA5 })); se.position.copy(sh.position); g.add(se);
+  for (let i = 0; i <= n; i++) box(g, 1.36, .05, 1.36, 0x85B7EB, 0, baseY + i * L - .03, 0);
+  const cab = new T.Group(); g.add(cab);
+  box(cab, 1.1, .08, 1.1, 0xF1EFE8, 0, 0, 0); box(cab, 1.1, .08, 1.1, 0x378ADD, 0, 1.32, 0); box(cab, 1.1, 1.24, .04, 0xB5D4F4, 0, .08, -.53);
+  const dl = box(cab, .55, 1.24, .04, 0x85B7EB, -.275, .08, .57), dr = box(cab, .55, 1.24, .04, 0x85B7EB, .275, .08, .57);
+  person(cab, 0, -.15, 0x378ADD, 0, 0);
+  const c = document.createElement('canvas'); c.width = 160; c.height = 72; const tex = new T.CanvasTexture(c);
+  const sp = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false })); sp.scale.set(1, .45, 1); sp.position.y = 1.8; sp.renderOrder = 11; cab.add(sp);
+  const e = { g, cab, dl, dr, gm, lv: lv0, ty: lv0, y: baseY + lv0 * L, baseY, codes, door: 0, ctx: c.getContext('2d'), tex, done: null, dir: 0 };
+  drawDisp(e); elevs.push(e); return e;
+}
+function drawDisp(e) { const x = e.ctx; x.clearRect(0, 0, 160, 72); x.fillStyle = '#042C53'; x.fillRect(4, 4, 152, 64); x.fillStyle = '#97C459'; x.font = '600 40px monospace'; x.textAlign = 'center'; x.fillText((e.done ? (e.dir > 0 ? '▲' : '▼') : '') + e.codes[e.lv], 80, 50); e.tex.needsUpdate = true; }
+function ride(e, lv) { return new Promise(r => { if (e.ty === lv && Math.abs(e.y - (e.baseY + lv * L)) < .001) { r(); return; } e.dir = Math.sign(lv - e.lv); e.ty = lv; e.done = r; drawDisp(e); }); }
+
+function drawLbl(f) {
+  const x = f.lctx; x.clearRect(0, 0, 720, 120); x.textAlign = f.right ? 'left' : 'right'; const X = f.right ? 10 : 710;
+  x.fillStyle = S.night ? '#E6F1FB' : '#185FA5'; x.font = '600 50px sans-serif'; x.fillText(f.code + '  ' + f.label, X, 58);
+  x.fillStyle = SC[f.status.st]; x.beginPath(); x.arc(f.right ? 20 : 700, 92, 10, 0, 7); x.fill();
+  x.fillStyle = S.night ? '#85B7EB' : '#378ADD'; x.font = '30px sans-serif'; x.fillText(f.site + (f.status.msg ? '　' + f.status.msg : ''), f.right ? X + 26 : X - 26, 103);
+  f.ltex.needsUpdate = true;
+}
+function drawScreen(f, st, p) {
+  const x = f.sctx; x.fillStyle = { idle: '#042C53', load: '#0C447C', ok: '#185FA5' }[st]; x.fillRect(0, 0, 512, 256);
+  if (st !== 'idle') { x.fillStyle = '#FF5A5F'; x.beginPath(); x.arc(26, 28, 8, 0, 7); x.fill(); }
+  x.fillStyle = st === 'idle' ? '#378ADD' : '#E6F1FB'; x.font = '600 24px monospace'; x.textAlign = 'left'; x.fillText('CAM-' + f.code, 44, 36);
+  x.textAlign = 'center'; x.font = '600 40px sans-serif';
+  if (st === 'idle') x.fillText(f.label, 256, 145);
+  else if (st === 'load') { x.fillText('連線中' + '.'.repeat(1 + ((p * 12) | 0) % 3), 256, 130); x.strokeStyle = '#85B7EB'; x.lineWidth = 3; x.strokeRect(76, 170, 360, 22); x.fillStyle = '#85B7EB'; x.fillRect(80, 174, 352 * p, 14); }
+  else { x.fillText(f.label, 256, 130); x.font = '28px sans-serif'; x.fillStyle = '#C0DD97'; x.fillText('連線成功', 256, 185); }
+  f.stex.needsUpdate = true;
+}
+
+function makeFloor(o, x, y, w, d, right, elev) {
+  const g = new T.Group(); g.position.set(x, y, 0); scene.add(g);
+  const slab = box(g, w + .2, .12, d + .2, 0xF1EFE8, 0, 0, 0);
+  const gm = new T.MeshLambertMaterial({ color: 0xCFE6FA, transparent: true, opacity: .14, depthWrite: false, side: T.DoubleSide });
+  const gl = new T.Mesh(new T.BoxGeometry(w, L - .12, d), gm); gl.position.y = .12 + (L - .12) / 2; g.add(gl);
+  const ed = new T.LineSegments(new T.EdgesGeometry(gl.geometry), new T.LineBasicMaterial({ color: 0x444441 })); ed.position.copy(gl.position); g.add(ed);
+  const nx = Math.round(w / 1.1), nz = Math.round(d / 1.1);
+  for (let i = 0; i <= nx; i++) { const px = -w / 2 + i * w / nx; box(g, .04, L - .12, .04, 0x5F5E5A, px, .12, d / 2); box(g, .04, L - .12, .04, 0x5F5E5A, px, .12, -d / 2); }
+  for (let i = 0; i <= nz; i++) { const pz = -d / 2 + i * d / nz; box(g, .04, L - .12, .04, 0x5F5E5A, w / 2, .12, pz); box(g, .04, L - .12, .04, 0x5F5E5A, -w / 2, .12, pz); }
+  const f = Object.assign({}, o, { g, slab, gm, w, d, right, elev, status: { st: 'load', msg: '', rows: [['狀態', '讀取資料中…']] } });
+  (THEMES[o.theme] || THEMES.desks)(g, w, d, f);
+  f.people = g.children.filter(c => c.userData.person);
+  const lt = new T.Mesh(new T.SphereGeometry(.1, 10, 8), new T.MeshBasicMaterial({ color: SC.load })); lt.position.set(right ? -w / 2 : w / 2, L - .25, d / 2 + .05); g.add(lt); f.light = lt;
+  const sc = document.createElement('canvas'); sc.width = 512; sc.height = 256; f.sctx = sc.getContext('2d'); f.stex = new T.CanvasTexture(sc);
+  const scr = new T.Mesh(new T.PlaneGeometry(2, 1), new T.MeshBasicMaterial({ map: f.stex })); scr.rotation.y = -Math.PI / 2; scr.position.set(w / 2 - .14, .97, -1.2); g.add(scr);
+  box(g, .06, 1.08, 2.08, 0x2C2C2A, w / 2 - .1, .43, -1.2);
+  const lc = document.createElement('canvas'); lc.width = 720; lc.height = 120; f.lctx = lc.getContext('2d'); f.ltex = new T.CanvasTexture(lc);
+  const lb = new T.Sprite(new T.SpriteMaterial({ map: f.ltex, transparent: true, depthTest: false })); lb.scale.set(5.9, .98, 1); lb.renderOrder = 10;
+  lb.position.set(right ? w / 2 + 5 : -w / 2 - 5, L / 2, d / 2); g.add(lb); f.lb = lb;
+  const hit = new T.Mesh(new T.BoxGeometry(w, L, d), new T.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = L / 2; g.add(hit); hit.userData.floor = f; f.hit = hit;
+  drawLbl(f); drawScreen(f, 'idle');
+  floors.push(f); byKey[f.key] = f; return f;
+}
+function roofCap(x, y, w, d, deco) {
+  const g = new T.Group(); g.position.set(x, y, 0); scene.add(g);
+  box(g, w + .2, .12, d + .2, 0xE6E4DC, 0, 0, 0);
+  box(g, w + .2, .3, .1, 0xD3D1C7, 0, .12, d / 2 + .05); box(g, w + .2, .3, .1, 0xD3D1C7, 0, .12, -d / 2 - .05); box(g, .1, .3, d, 0xD3D1C7, w / 2 + .05, .12, 0); box(g, .1, .3, d, 0xD3D1C7, -w / 2 - .05, .12, 0);
+  if (!deco) return;
+  const tank = new T.Mesh(new T.CylinderGeometry(.5, .5, .9, 16), mat(0xB4B2A9)); tank.position.set(-2.2, .57, -1); tank.castShadow = true; g.add(tank);
+  box(g, .8, .4, .6, 0xD3D1C7, .4, .12, -1.2); box(g, .8, .4, .6, 0xD3D1C7, 1.4, .12, -1.2);
+  box(g, .08, 1.6, .08, 0x5F5E5A, 2.8, .12, 1.4); const ca = box(g, .3, .18, .18, 0x2C2C2A, 2.8, 1.72, 1.5); anims.push(t => ca.rotation.y = Math.sin(t * .6) * 1.2);
+}
+function tree(x, z, s) {
+  const t = new T.Mesh(new T.CylinderGeometry(.12 * s, .15 * s, .8 * s, 6), mat(0x854F0B)); t.position.set(x, G + .4 * s, z); t.castShadow = true; scene.add(t);
+  [[0, 1.1, 0, .6], [.3, .9, .2, .42], [-.28, .95, -.1, .45]].forEach(a => { const l = new T.Mesh(new T.IcosahedronGeometry(a[3] * s, 0), mat(0x639922)); l.position.set(x + a[0] * s, G + a[1] * s, z + a[2] * s); l.castShadow = true; scene.add(l); });
+}
+function car(c, x, z, ry) {
+  const g = new T.Group(); g.position.set(x, G, z); g.rotation.y = ry || 0; scene.add(g);
+  box(g, 1.1, .32, .55, c, 0, .12, 0); box(g, .6, .26, .5, 0x2C2C2A, -.05, .44, 0);
+  [[-.35, .27], [.35, .27], [-.35, -.27], [.35, -.27]].forEach(w => { const m = new T.Mesh(new T.CylinderGeometry(.12, .12, .08, 10), mat(0x2C2C2A)); m.rotation.x = Math.PI / 2; m.position.set(w[0], .12, w[1]); g.add(m); });
+  return g;
+}
+
+function readNav() {
+  const base = [], main = [], annex = [];
+  NAV.filter(n => !n.href).forEach(n => {
+    const c = n.floor || {}, o = { key: n.key, label: n.label, site: c.site || '共用', theme: c.theme || 'desks' };
+    if (c.wing === 'annex') annex.push(o); else if (c.basement) base.push(o); else main.push(o);
+  });
+  base.forEach((o, i) => o.code = 'B' + (i + 1));
+  main.forEach((o, i) => o.code = (i + 1) + 'F');
+  annex.forEach((o, i) => { o.code = 'A' + (i + 1); o.lv = i; });
+  const mainAll = base.slice().reverse().concat(main); mainAll.forEach((o, i) => o.lv = i);
+  return { nb: base.length, mainAll, annex };
+}
+
+function build() {
+  T = window.THREE;
+  const { nb, mainAll, annex } = readNav(); G = nb * L;
+  scene = new T.Scene();
+  ren = new T.WebGLRenderer({ antialias: true, alpha: true });
+  ren.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); ren.shadowMap.enabled = true; ren.shadowMap.type = T.PCFSoftShadowMap;
+  $('fm-cv').appendChild(ren.domElement);
+  cam = new T.PerspectiveCamera(38, 1, .1, 400);
+  const Htot = mainAll.length * L;
+  HT = V(4, G + (Htot - G) * .42, 0);
+  HOME = HT.clone().add(V(22, 13, 32).normalize().multiplyScalar(Math.max(30, Htot * 1.6 + 8)));
+  orbit = new T.OrbitControls(cam, ren.domElement); orbit.enableDamping = true; orbit.autoRotate = true; orbit.autoRotateSpeed = .45;
+  orbit.maxPolarAngle = Math.PI * .47; orbit.minDistance = 6; orbit.maxDistance = HOME.distanceTo(HT) * 1.8;
+  hemi = new T.HemisphereLight(0xffffff, 0xC0DD97, .75); scene.add(hemi);
+  sun = new T.DirectionalLight(0xffffff, .7); sun.position.set(-14, Htot + 30, 18); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+  const sb = Math.max(25, Htot); Object.assign(sun.shadow.camera, { left: -sb, right: sb, top: sb, bottom: -sb, far: Htot + 90 }); scene.add(sun);
+
+  const eMain = makeElev(-5.4, 1.6, 0, mainAll.length, mainAll.map(o => o.code), nb);
+  let topOff = 0;
+  mainAll.forEach((o, i) => { const off = i <= nb ? 0 : OFF[(i - nb - 1) % OFF.length]; topOff = off; makeFloor(o, off, i * L, 8, 5, false, eMain); });
+  roofCap(topOff, mainAll.length * L, 8, 5, true);
+  if (annex.length) {
+    const eAnx = makeElev(14.1, 1.4, G, annex.length, annex.map(o => o.code), 0);
+    annex.forEach((o, i) => makeFloor(o, 10.2, G + i * L, 6, 4.6, true, eAnx));
+    roofCap(10.2, G + annex.length * L, 6, 4.6, false);
+    box(scene, 1.8, .6, 1.4, 0xB5D4F4, 5.5, G + Math.min(1, annex.length - 1) * L + .3, 0);
+  }
+  grassM = new T.MeshLambertMaterial({ color: 0x97C459 });
+  const gh = Math.max(G, .4);
+  const zones = nb ? [[-40, -40, 80, 36.9], [-40, 3.1, 80, 50], [-40, -3.1, 33.6, 6.2], [4.6, -3.1, 55.4, 6.2]] : [[-40, -40, 80, 100]];
+  zones.forEach(r => { const m = new T.Mesh(new T.BoxGeometry(r[2], gh, r[3]), grassM); m.position.set(r[0] + r[2] / 2, G - gh / 2, r[1] + r[3] / 2); m.receiveShadow = true; scene.add(m); });
+  if (nb) box(scene, 11, .04, 6.2, 0xD3D1C7, -.9, -.04, 0);
+  box(scene, 28, .04, 4, 0xF1EFE8, 4, G, 5.6); box(scene, 80, .04, 3.2, 0x888780, 0, G + .01, 9.8);
+  for (let i = -20; i < 21; i++) box(scene, .8, .01, .12, 0xFFFFFF, i * 2, G + .05, 9.8);
+  const c1 = car(0x185FA5, 0, 9.1, 0), c2 = car(0xE24B4A, 0, 10.5, Math.PI);
+  anims.push(t => { c1.position.x = ((t * 3) % 60) - 30; c2.position.x = 30 - ((t * 2.4 + 25) % 60); });
+  const booth = new T.Group(); booth.position.set(17.5, G, 6.6); scene.add(booth); box(booth, 1.2, 1, 1, 0xF1EFE8, 0, 0, 0); box(booth, 1.4, .1, 1.2, 0x378ADD, 0, 1, 0); person(booth, 0, .75, 0xEF9F27);
+  [[-10, -6, 1.2], [-11, 4, 1], [-3, 7.2, .8], [12, 7.6, .8], [8, -6, 1.2], [2, -7, 1], [21, -4, 1.1], [-14, -1, 1.1]].forEach(t => tree(...t));
+  clock = new T.Clock();
+
+  const ray = new T.Raycaster(), mp = new T.Vector2();
+  const pick = e => { const r = ren.domElement.getBoundingClientRect(); mp.x = ((e.clientX - r.left) / r.width) * 2 - 1; mp.y = -((e.clientY - r.top) / r.height) * 2 + 1; ray.setFromCamera(mp, cam); const h = ray.intersectObjects(floors.map(f => f.hit)); return h.length ? h[0].object.userData.floor : null; };
+  const card = $('fm-card');
+  ren.domElement.addEventListener('pointermove', e => {
+    if (S.busy || S.inPage) return; const f = pick(e);
+    if (hov !== f) { if (hov) hov.slab.material = mat(0xF1EFE8); if (f) f.slab.material = mat(0x378ADD); hov = f; }
+    if (!f) { card.style.opacity = 0; ren.domElement.style.cursor = 'grab'; return; }
+    ren.domElement.style.cursor = 'pointer';
+    const s = f.status;
+    card.innerHTML = `<div class="fm-card-title">${f.code}　${esc(f.label)}</div>
+      <div class="fm-card-chips"><span class="fm-chip">${esc(f.site)}</span><span class="fm-chip" style="color:${SC[s.st]}">● ${SN[s.st]}</span></div>
+      <div class="fm-card-grid">${s.rows.map(r => `<span>${esc(r[0])}</span><b>${esc(String(r[1]))}</b>`).join('')}</div>
+      ${s.msg ? `<div class="fm-card-msg" style="color:${SC[s.st]}">${esc(s.msg)}</div>` : ''}`;
+    const r = stage.getBoundingClientRect(); let x = e.clientX - r.left + 16, y = e.clientY - r.top + 12;
+    if (x + 250 > r.width) x -= 276; if (y + card.offsetHeight + 10 > r.height) y -= card.offsetHeight + 24;
+    card.style.left = x + 'px'; card.style.top = y + 'px'; card.style.opacity = 1;
+  });
+  ren.domElement.addEventListener('pointerleave', () => card.style.opacity = 0);
+  let down = null;
+  ren.domElement.addEventListener('pointerdown', e => down = [e.clientX, e.clientY]);
+  ren.domElement.addEventListener('pointerup', e => { if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || S.busy || S.inPage) return; const f = pick(e); if (f) enter(f); });
+  S.built = true; layout(); applyNight();
+}
+
+/* ---------- 迴圈 ---------- */
+function startLoop() { if (S.built && S.visible && !S.raf) S.raf = requestAnimationFrame(loop); }
+function loop() {
+  if (!S.visible) { S.raf = 0; return; }
+  S.raf = requestAnimationFrame(loop);
+  const t = clock.getElapsedTime(), dt = Math.min(.05, t - last); last = t;
+  anims.forEach(a => a(t));
+  elevs.forEach(e => {
+    const tg = e.baseY + e.ty * L, d = tg - e.y, st = dt * L / .3;
+    if (Math.abs(d) <= st) { e.y = tg; if (e.done) { const r = e.done; e.done = null; drawDisp(e); r(); } } else e.y += Math.sign(d) * st;
+    const lv = Math.round((e.y - e.baseY) / L); if (lv !== e.lv) { e.lv = lv; drawDisp(e); }
+    e.cab.position.y = e.y + .04;
+    e.dl.position.x += ((-.275 - e.door * .5) - e.dl.position.x) * .15; e.dr.position.x += ((.275 + e.door * .5) - e.dr.position.x) * .15;
+  });
+  const k = (Math.sin(t * 5) + 1) / 2;
+  floors.forEach(f => {
+    f.people.forEach(p => { if (p.userData.walker) return; let d = p.userData.ty - p.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); p.rotation.y += d * .1; });
+    const st = f.status.st;
+    f.light.visible = st !== 'alarm' || Math.sin(t * 10) > 0;
+    f.light.scale.setScalar(st === 'warn' ? .8 + Math.abs(Math.sin(t * 3)) * .6 : 1);
+    if (st === 'alarm') f.gm.emissive.setRGB(.55 * k, 0, 0); else f.gm.emissive.set(S.night ? 0x6b4a10 : 0x000000);
+  });
+  if (follow) { const w = follow.cab.getWorldPosition(V(0, 0, 0)); camT.t = w.clone().add(V(0, .8, 0)); camT.p = w.clone().add(V(3.5, 2.6, 10)); }
+  if (camT.p) { const a = 1 - Math.pow(.94, dt * 60); cam.position.lerp(camT.p, a); orbit.target.lerp(camT.t, a); }
+  orbit.update(); ren.render(scene, cam);
+}
+
+/* ---------- 狀態 ---------- */
+function calcStatus(key) {
+  if (!S.dataReady) return { st: 'load', msg: '', rows: [['狀態', '讀取資料中…']] };
+  try { const fn = FLOOR_STATUS[key]; return fn ? fn() : { st: 'none', msg: '', rows: [] }; }
+  catch (e) { console.warn('樓層狀態計算失敗', key, e); return { st: 'none', msg: '', rows: [] }; }
+}
+function updateStatuses() {
+  if (!S.built) return;
+  floors.forEach(f => { f.status = calcStatus(f.key); f.status.msg = f.status.msg || ''; drawLbl(f); f.light.material.color.set(SC[f.status.st]); });
+  const df = floors.find(f => f.tags);
+  if (df && S.dataReady) { const t = todayStr(), names = DB.duty.filter(x => x.date === t).map(x => x.person); df.tags.forEach((s, i) => s.userData.set(names[i] ? '值班 ' + names[i] : '')); }
+  const al = $('fm-alarms'), list = floors.filter(f => f.status.st === 'alarm' || f.status.st === 'warn').sort((a, b) => (b.status.st === 'alarm') - (a.status.st === 'alarm'));
+  al.innerHTML = `<div class="fm-al-head">⚠ 警報清單</div>` + (S.dataReady ? (list.map(f => `<div class="fm-al-row" data-k="${f.key}"><span class="fm-al-dot" style="background:${SC[f.status.st]}"></span><b>${f.code}</b> ${esc(f.label)} · ${esc(f.status.msg)}</div>`).join('') || `<div class="fm-al-row"><span class="fm-al-dot" style="background:${SC.ok}"></span>目前沒有警報</div>`) : `<div class="fm-al-row">讀取資料中…</div>`);
+  al.querySelectorAll('[data-k]').forEach(r => r.onclick = () => { if (!S.inPage && !S.busy) enter(byKey[r.dataset.k]); });
+  decorateNav();
+}
+
+/* ---------- 左側選單＝電梯面板 ---------- */
+function decorateNav() {
+  const list = $('navList'); if (!list) return;
+  list.querySelectorAll('.fm-x').forEach(e => e.remove());
+  if (!S.on || !S.built) return;
+  let sepDone = false;
+  list.querySelectorAll('button.nav-item').forEach(b => {
+    const m = (b.getAttribute('onclick') || '').match(/goPage\('([^']+)'\)/); const f = m && byKey[m[1]]; if (!f) return;
+    if (f.right && !sepDone) { const s = document.createElement('div'); s.className = 'fm-nav-sep fm-x'; s.textContent = '附屬館'; list.insertBefore(s, b); sepDone = true; }
+    const c = document.createElement('span'); c.className = 'fm-code fm-x'; c.textContent = f.code; b.insertBefore(c, b.firstChild);
+    const d = document.createElement('span'); d.className = 'fm-ndot fm-x'; d.style.background = SC[f.status.st]; b.appendChild(d);
+    if (!S.inPage) b.classList.remove('active');
+  });
+  const h = document.createElement('button'); h.className = 'nav-item fm-x' + (S.inPage ? '' : ' active');
+  h.innerHTML = '<span>🏢 大樓總覽</span>'; h.onclick = () => goHome(); list.insertBefore(h, list.firstChild);
+}
+
+/* ---------- 進出樓層 ---------- */
+function inPos(f) { return { p: f.g.localToWorld(V(f.w / 2 - 2.7, 1.0, -1.2)), t: f.g.localToWorld(V(f.w / 2 - .14, .97, -1.2)) }; }
+function scrRect(f) {
+  cam.updateMatrixWorld(); const W = stage.clientWidth, H = stage.clientHeight; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  [[.5, 1], [.5, -1], [-.5, 1], [-.5, -1]].forEach(([dy, dz]) => { const v = f.g.localToWorld(V(f.w / 2 - .14, .97 + dy, -1.2 + dz)).project(cam); const px = (v.x + 1) / 2 * W, py = (1 - v.y) / 2 * H; x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py); });
+  return { x: x0, y: y0, w: Math.max(20, x1 - x0), h: Math.max(10, y1 - y0) };
+}
+function toRect(r) { return `translate(${r.x}px,${r.y}px) scale(${r.w / stage.clientWidth},${r.h / stage.clientHeight})`; }
+function turn(f, on) { const cx = f.w / 2 - 2.7, cz = -1.2; f.people.forEach(p => { if (p.userData.walker) return; setTimeout(() => p.userData.ty = on ? Math.atan2(cx - p.position.x, cz - p.position.z) : p.userData.r0, on ? Math.random() * 500 : 0); }); }
+function camArrive(maxMs) {
+  return new Promise(r => { const t0 = performance.now(); (function chk() {
+    if (!camT.p || cam.position.distanceTo(camT.p) < .12 || performance.now() - t0 > maxMs) { if (camT.p) { cam.position.copy(camT.p); orbit.target.copy(camT.t); } r(); return; }
+    setTimeout(chk, 50); })(); });
+}
+function labels(v) { floors.forEach(f => f.lb.visible = v); }
+function hud(v) { ['fm-alarms', 'fm-hint'].forEach(id => $(id).style.visibility = v ? '' : 'hidden'); }
+function showStage() { stage.style.display = 'block'; S.visible = true; layout(); startLoop(); }
+function hideStage() { stage.style.display = 'none'; S.visible = false; $('fm-card').style.opacity = 0; }
+function resetContent() { contentEl.classList.remove('fm-zoom'); contentEl.style.transition = ''; contentEl.style.transform = ''; contentEl.style.opacity = ''; }
+function ding() {
+  if (!S.sound) return;
+  try {
+    S.actx = S.actx || new (window.AudioContext || window.webkitAudioContext)();
+    [[1318, 0], [1046, .2]].forEach(([fq, t0]) => { const a = S.actx, o = a.createOscillator(), g = a.createGain(), n = a.currentTime + t0; o.frequency.value = fq; g.gain.setValueAtTime(0, n); g.gain.linearRampToValueAtTime(.18, n + .02); g.gain.exponentialRampToValueAtTime(.001, n + .9); o.connect(g).connect(a.destination); o.start(n); o.stop(n + 1); });
+  } catch (e) {}
+}
+function homeView() {
+  floors.forEach(f => { drawScreen(f, 'idle'); f.people.forEach(p => p.userData.ty = p.userData.r0); });
+  elevs.forEach(e => e.door = 0); labels(true); hud(true); follow = null;
+  if (hov) { hov.slab.material = mat(0xF1EFE8); hov = null; }
+}
+
+async function enter(f) {
+  if (S.busy || S.inPage || !f) return; S.busy = true; S.cur = f;
+  $('fm-card').style.opacity = 0; if (hov) { hov.slab.material = mat(0xF1EFE8); hov = null; }
+  orbit.autoRotate = false; orbit.enabled = false;
+  if (S.quick) {
+    origGoPage(f.key); placeAt(f); hideStage(); S.inPage = true; S.busy = false; updateCtl(); decorateNav(); return;
+  }
+  labels(false); hud(false);
+  const e = f.elev;
+  follow = e;
+  if (e.lv !== f.lv || Math.abs(e.y - (e.baseY + f.lv * L)) > .01) { e.door = 0; await wait(400); await ride(e, f.lv); await wait(150); } else await wait(700);
+  ding(); e.door = 1; await wait(550);
+  follow = null; const v = inPos(f); camT.p = v.p; camT.t = v.t; turn(f, 1); await wait(500); await camArrive(4000);
+  for (let i = 0; i <= 20; i++) { drawScreen(f, 'load', i / 20); await wait(40); }
+  drawScreen(f, 'ok'); await wait(300);
+  origGoPage(f.key); contentEl.scrollTop = 0;
+  const r = scrRect(f);
+  contentEl.classList.add('fm-zoom'); contentEl.style.transition = 'none'; contentEl.style.transform = toRect(r); void contentEl.offsetWidth;
+  contentEl.style.transition = 'transform .55s cubic-bezier(.2,.7,.2,1)'; contentEl.style.transform = 'none';
+  await wait(600);
+  hideStage(); resetContent();
+  S.inPage = true; S.busy = false; updateCtl(); decorateNav();
+}
+
+async function goBack() {
+  if (S.busy || !S.inPage) return; S.busy = true; const f = S.cur;
+  showStage();
+  if (!S.quick && f) {
+    const v = inPos(f); cam.position.copy(v.p); orbit.target.copy(v.t); camT.p = v.p.clone(); camT.t = v.t.clone(); orbit.update(); ren.render(scene, cam);
+    contentEl.classList.add('fm-zoom'); contentEl.style.transition = 'none'; contentEl.style.transform = 'none'; void contentEl.offsetWidth;
+    contentEl.style.transition = 'transform .5s cubic-bezier(.5,0,.8,.3)'; contentEl.style.transform = toRect(scrRect(f));
+    await wait(520); contentEl.style.transition = 'opacity .15s'; contentEl.style.opacity = '0'; await wait(160);
+  }
+  resetContent(); S.inPage = false; homeView(); updateCtl(); decorateNav();
+  if (S.quick) { cam.position.copy(HOME); orbit.target.copy(HT); camT.p = null; }
+  else { camT.p = HOME.clone(); camT.t = HT.clone(); await wait(400); await camArrive(5000); camT.p = null; }
+  orbit.enabled = true; orbit.autoRotate = true; S.busy = false;
+}
+function goHome() { if (S.inPage) goBack(); }
+
+function placeAt(to) {
+  const prev = S.cur; if (prev && prev !== to) { drawScreen(prev, 'idle'); turn(prev, 0); prev.elev.door = 0; }
+  const e = to.elev; e.ty = e.lv = to.lv; e.y = e.baseY + to.lv * L; e.done = null; drawDisp(e); e.door = 1;
+  const v = inPos(to); cam.position.copy(v.p); orbit.target.copy(v.t); camT.p = v.p.clone(); camT.t = v.t.clone();
+  drawScreen(to, 'ok'); turn(to, 1); S.cur = to;
+}
+
+async function hop(to) {
+  if (S.busy) return; S.busy = true; const from = S.cur;
+  if (S.quick || !from) { origGoPage(to.key); placeAt(to); S.busy = false; decorateNav(); return; }
+  doors.style.display = 'block'; void doors.offsetWidth; doors.classList.add('closed'); await wait(380);
+  const cnt = $('fm-counter'); cnt.style.opacity = 1; $('fm-cn').textContent = to.label;
+  const seq = [];
+  if (to.elev === from.elev) { const s = Math.sign(to.lv - from.lv) || 1; for (let i = from.lv; i !== to.lv + s; i += s) seq.push(to.elev.codes[i]); $('fm-ca').textContent = s > 0 ? '▲' : '▼'; }
+  else { seq.push('連通橋', to.code); $('fm-ca').textContent = '⇄'; }
+  for (const c of seq) { $('fm-ct').textContent = c; await wait(c.length > 3 ? 550 : 200); }
+  ding(); origGoPage(to.key); contentEl.scrollTop = 0; placeAt(to); decorateNav();
+  await wait(200); cnt.style.opacity = 0; doors.classList.remove('closed'); await wait(380); doors.style.display = 'none';
+  S.busy = false;
+}
+
+/* ---------- 掛勾原本的 goPage / renderNav / render ---------- */
+const origGoPage = window.goPage, origRenderNav = window.renderNav, origRender = window.render;
+window.goPage = function (key) {
+  if (!S.on || !S.built) return origGoPage(key);
+  const f = byKey[key]; if (!f) return origGoPage(key);
+  if (S.busy) return;
+  if (!S.inPage) return enter(f);
+  if (f === S.cur) return origGoPage(key);
+  return hop(f);
+};
+window.renderNav = function () { origRenderNav.apply(this, arguments); decorateNav(); updateCtl(); };
+window.render = function () { origRender.apply(this, arguments); S.dataReady = true; if (S.on) updateStatuses(); };
+
+/* ---------- 日夜 / 模式切換 ---------- */
+function applyNight() {
+  const h = new Date().getHours();
+  S.night = S.nightMode === 'night' || (S.nightMode === 'auto' && (h >= 18 || h < 6));
+  stage.classList.toggle('night', S.night); updateCtl();
+  if (!S.built) return;
+  hemi.intensity = S.night ? .3 : .75; sun.intensity = S.night ? .15 : .7;
+  floors.forEach(f => { f.gm.color.set(S.night ? 0xFAC775 : 0xCFE6FA); f.gm.opacity = S.night ? .3 : .14; drawLbl(f); });
+  elevs.forEach(e => { e.gm.color.set(S.night ? 0xFAC775 : 0xCFE6FA); e.gm.opacity = S.night ? .22 : .12; });
+  grassM.color.set(S.night ? 0x27500A : 0x97C459);
+}
+setInterval(() => { if (S.nightMode === 'auto') applyNight(); }, 60000);
+
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('無法載入 ' + src)); document.head.appendChild(s); }); }
+async function ensure3D() {
+  if (S.built) return;
+  if (!window.THREE) await loadScript(THREE_SRC);
+  if (!window.THREE.OrbitControls) await loadScript(ORBIT_SRC);
+  build();
+}
+async function setMode(on) {
+  if (on && window.innerWidth < 900) { alert('樓層模式需要較寬的螢幕（至少 900px），手機或小視窗請使用原版模式。'); on = false; }
+  S.on = on; LS.set('mode', on ? '1' : '0'); document.body.classList.toggle('fm-on', on);
+  if (!on) { hideStage(); doors.style.display = 'none'; doors.classList.remove('closed'); resetContent(); S.inPage = false; S.busy = false; updateCtl(); if ($('navList').children.length) renderNav(); return; }
+  S.inPage = false; S.busy = false; showStage(); $('fm-loading').style.display = 'flex'; updateCtl();
+  try { await ensure3D(); }
+  catch (e) { console.error(e); alert('3D 大樓載入失敗，已切回原版模式。\n' + (e.message || e)); return setMode(false); }
+  if (!S.on) return;
+  $('fm-loading').style.display = 'none';
+  homeView(); cam.position.copy(HOME); orbit.target.copy(HT); camT.p = null; orbit.enabled = true; orbit.autoRotate = true;
+  layout(); updateStatuses(); updateCtl(); startLoop();
+}
+
+$('fm-b-mode').onclick = () => setMode(!S.on);
+$('fm-b-home').onclick = goHome;
+$('fm-b-night').onclick = () => { S.nightMode = { auto: 'day', day: 'night', night: 'auto' }[S.nightMode]; LS.set('night', S.nightMode); applyNight(); };
+$('fm-b-quick').onclick = () => { S.quick = !S.quick; LS.set('quick', S.quick ? '1' : '0'); updateCtl(); };
+$('fm-b-snd').onclick = () => { S.sound = !S.sound; LS.set('sound', S.sound ? '1' : '0'); updateCtl(); ding(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.on && S.inPage && !document.getElementById('modalBackdrop')) goBack(); });
+
+updateCtl();
+if (LS.get('mode', '0') === '1') setMode(true);
+window.FloorMode = { setMode, state: S, floors };
+})();
+</script>
+
 </body>
 </html>
