@@ -3875,6 +3875,17 @@ body.sb-hidden.sb-peek .sidebar { transform: none; box-shadow: 6px 0 24px rgba(3
 body.sb-hidden #sb-edge { display: block; }
 #sb-pin { margin: -12px 6px 0; font-size: 12px; }
 body:not(.sb-hidden) #sb-pin { display: none; }
+/* ---- 手機／窄螢幕：選單改為完整文字的滑出抽屜 ---- */
+@media (max-width: 900px) {
+  .sidebar { width: 250px; max-width: 82vw; }
+  .brand-title, .brand-sub { display: block; }
+  .nav-item span { display: inline; }
+  .nav-item .fm-ndot { display: inline-block; }
+  #sb-pin, body.sb-hidden #sb-edge { display: none !important; }
+  .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+  .topbar > div:last-child { flex-wrap: wrap; gap: 8px !important; }
+  .content { padding: 16px 14px; }
+}
 </style>
 <script>
 (function () {
@@ -3917,7 +3928,14 @@ body:not(.sb-hidden) #sb-pin { display: none; }
 
   document.addEventListener('click', e => { if (document.body.classList.contains('sb-peek') && !sidebar.contains(e.target) && !btn.contains(e.target)) peek(false); });
 
-  apply(get() !== '0');   // 預設隱藏
+  // 手機／窄螢幕：一律使用滑出式選單（不佔畫面），不影響電腦版記住的設定
+  const mq = window.matchMedia('(max-width: 900px)');
+  const initFor = () => {
+    if (mq.matches) { document.body.classList.add('sb-hidden'); peek(false); btn.title = '顯示選單'; }
+    else apply(get() !== '0');   // 預設隱藏
+  };
+  if (mq.addEventListener) mq.addEventListener('change', initFor); else if (mq.addListener) mq.addListener(initFor);
+  initFor();
 })();
 </script>
 
